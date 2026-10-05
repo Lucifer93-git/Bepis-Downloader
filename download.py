@@ -1239,4 +1239,325 @@ class BatchSession:
             print(f"{display_id}: Already exists - skipped")
         else:
             self.failed_ids.append(str(display_id))
-           
+            if part_path is not None:
+                self.cleanup_paths.append(part_path)
+            print(f"{display_id}: Download failed")
+
+        return status
+
+    def process_direct_id(self, browser, item, page_delay):
+        """Process one numeric Card/Scene ID from the browser-rendered detail page."""
+        status, message, part_path, final_path = _download_direct_id(
+            browser, self.client, item, self.destination, page_delay
+        )
+        self.processed += 1
+        display_id = item["display"]
+
+        if status == "downloaded":
+            self.downloaded += 1
+            self.completed_files.append(final_path)
+            print(f"{display_id}: Downloaded")
+        elif status == "skipped":
+            self.skipped += 1
+            print(f"{display_id}: Already exists - skipped")
+        else:
+            self.failed_ids.append(str(display_id))
+            if part_path is not None:
+                self.cleanup_paths.append(part_path)
+            print(f"{display_id}: Download failed")
+            print(f"Reason: {message or 'Unknown download error'}")
+
+        return status
+
+    def wait_after_item(self, has_more, status=None):
+        """Use the same gentle pacing for every processed card.
+
+        Existing, downloaded, and failed cards all count toward the batch.
+        This avoids rapidly stepping through the site when many cards already
+        exist locally.
+        """
+        if not has_more:
+            return
+
+        # Every 10 processed cards gets the longer anti-overload pause,
+        # including cards that were skipped because they already existed.
+        if self.processed % BATCH_SIZE == 0:
+            print("\nWaiting 5 seconds to avoid overloading the website...\n")
+            time.sleep(BATCH_DELAY_SECONDS)
+        else:
+            time.sleep(CARD_DELAY_SECONDS)
+
+    def cleanup(self):
+        if not self.cleanup_paths:
+            return
+        print("\nCleaning up incomplete downloads...")
+        for path in self.cleanup_paths:
+            try:
+                if path and Path(path).exists():
+                    Path(path).unlink()
+            except OSError:
+                pass
+
+    def verify(self):
+        for path in list(self.completed_files):
+            if not path or not Path(path).exists() or Path(path).suffix.casefold() != ".png":
+                ident = _numeric_id_from_url(str(path or ""))
+                if ident not in self.failed_ids:
+                    self.failed_ids.append(ident)
+
+    def result(self):
+        return {
+            "downloaded": self.downloaded,
+            "skipped": self.skipped,
+            "failed_ids": self.failed_ids[:],
+        }
+
+
+def _print_summary(data, destination, config):
+    print("\n" + "-" * 40)
+    if data.get("mode") == "user":
+        print("Mode:          User Page")
+        print(f"URL:           {data['url']}")
+    elif data.get("mode") == "ids":
+        print(f"Game:          {data.get('label', data.get('game', 'BepisDB'))}")
+        print(f"Mode:          {data.get('id_kind', 'Card')}")
+        print(f"ID selection:  {data.get('id_display', 'Not specified')}")
+    else:
+        print(f"Game:          {data.get('label', data.get('game', 'BepisDB'))}")
+        print(f"Search source: {data.get('search_source', 'Manual')}")
+    print(f"Save to:       {destination}")
+    print("-" * 40)
+    print("\nStarting download...\n")
+
+
+
+def _listing_pagination_state(browser, current_page: int, item_count: int):
+    """Read BepisDB's rendered pagination and return (has_next, last_page).
+
+    r24 was too dependent on conventional pagination markup. BepisDB can render
+    its page controls without the CSS/HTML patterns r24 expected, which caused
+    a full page of 24 cards to be mistaken for the final page.
+
+    r25 inspects the live DOM much more broadly:
+      - href/query values containing page=N
+      - data-page/data-pagenumber/data-page-number
+      - aria-label/title/visible pagination text
+      - enabled Next controls
+      - body text such as "Page 1 of 12"
+
+    If BepisDB exposes no usable pagination metadata at all, a completely full
+    24-card page is treated as evidence that another page may exist. The normal
+    repeated-page signature guard still prevents an endless loop.
+    """
+    driver = browser.driver
+    page_numbers = {current_page}
+    has_enabled_next = False
+    has_disabled_next = False
+    explicit_pagination_seen = False
+
+    try:
+        info = driver.execute_script(r"""
+            const out = {
+                candidates: [],
+                bodyText: document.body ? document.body.innerText : ""
+            };
+
+            const nodes = document.querySelectorAll(
+                "a,button,[role='button'],[aria-label],[title]," +
+                "[data-page],[data-pagenumber],[data-page-number]"
+            );
+
+            for (const el of nodes) {
+                let parent = el.parentElement;
+                let ancestry = "";
+                for (let i = 0; parent && i < 4; i++, parent = parent.parentElement) {
+                    ancestry += " " + (parent.id || "") + " " + (parent.className || "");
+                }
+
+                out.candidates.push({
+                    text: (el.innerText || el.textContent || "").trim(),
+                    href: el.href || el.getAttribute("href") || "",
+                    aria: el.getAttribute("aria-label") || "",
+                    title: el.getAttribute("title") || "",
+                    rel: el.getAttribute("rel") || "",
+                    dataPage: el.getAttribute("data-page") || "",
+                    dataPageNumber: el.getAttribute("data-pagenumber") ||
+                                    el.getAttribute("data-page-number") || "",
+                    classes: el.getAttribute("class") || "",
+                    ancestry: ancestry,
+                    disabled: !!el.disabled,
+                    ariaDisabled: el.getAttribute("aria-disabled") || ""
+                });
+            }
+            return out;
+        """) or {}
+    except Exception:
+        info = {}
+
+    for item in info.get("candidates", []):
+        values = [
+            str(item.get("href", "")),
+            str(item.get("aria", "")),
+            str(item.get("title", "")),
+            str(item.get("dataPage", "")),
+            str(item.get("dataPageNumber", "")),
+        ]
+
+        # Parse page=N anywhere in an href or other pagination metadata.
+        for value in values:
+            if not value:
+                continue
+            try:
+                parsed = urlsplit(value)
+                query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+                raw = query.get("page")
+                if raw and str(raw).isdigit():
+                    page_numbers.add(int(raw))
+                    explicit_pagination_seen = True
+            except Exception:
+                pass
+
+            for match in re.finditer(r"(?:^|[?&\s])page(?:=|\s+)(\d+)", value, re.I):
+                page_numbers.add(int(match.group(1)))
+                explicit_pagination_seen = True
+
+            match = re.search(r"\bpage\s*(?:number\s*)?(\d+)\b", value, re.I)
+            if match:
+                page_numbers.add(int(match.group(1)))
+                explicit_pagination_seen = True
+
+            if value.strip().isdigit():
+                number = int(value.strip())
+                if 1 <= number <= 100000:
+                    page_numbers.add(number)
+                    explicit_pagination_seen = True
+
+        # Numeric visible text is only trusted when its nearby DOM ancestry
+        # clearly looks like pagination, preventing card IDs from being read as pages.
+        text = str(item.get("text", "")).strip()
+        ancestry = (
+            str(item.get("ancestry", "")) + " " +
+            str(item.get("classes", ""))
+        ).casefold()
+        if text.isdigit() and any(
+            word in ancestry for word in ("pagination", "paginator", "pager", "page-nav", "pages")
+        ):
+            number = int(text)
+            if 1 <= number <= 100000:
+                page_numbers.add(number)
+                explicit_pagination_seen = True
+
+        # Generic Next-control fallback.
+        label_bits = " ".join([
+            text,
+            str(item.get("aria", "")),
+            str(item.get("title", "")),
+            str(item.get("rel", "")),
+        ]).strip().casefold()
+
+        looks_next = (
+            label_bits in ("next", "next page", ">", "›", "»")
+            or "next page" in label_bits
+            or str(item.get("rel", "")).casefold() == "next"
+        )
+        disabled = (
+            bool(item.get("disabled"))
+            or str(item.get("ariaDisabled", "")).casefold() == "true"
+            or "disabled" in str(item.get("classes", "")).casefold()
+            or "disabled" in ancestry
+        )
+        if looks_next:
+            explicit_pagination_seen = True
+            if disabled:
+                has_disabled_next = True
+            else:
+                has_enabled_next = True
+
+    body_text = str(info.get("bodyText", ""))
+
+    # Catch common summary formats such as "Page 1 of 12".
+    for pattern in (
+        r"\bpage\s+\d+\s+of\s+(\d+)\b",
+        r"\bpage\s+\d+\s*/\s*(\d+)\b",
+    ):
+        match = re.search(pattern, body_text, re.I)
+        if match:
+            page_numbers.add(int(match.group(1)))
+            explicit_pagination_seen = True
+
+    last_page = max(page_numbers) if page_numbers else current_page
+
+    if last_page > current_page:
+        return True, last_page
+
+    if has_enabled_next:
+        return True, None
+
+    # A disabled Next control is a strong signal that this really is the end.
+    if has_disabled_next:
+        return False, last_page
+
+    # BepisDB currently serves 24 cards on a full User Page. r25 could still
+    # stop early when it noticed *some* pagination markup but failed to discover
+    # a higher page number. A full page must therefore continue unless we have
+    # a definite disabled Next control.
+    if item_count >= 24:
+        return True, None
+
+    # A partial page with no enabled Next control is treated as the last page.
+    return False, last_page
+
+
+
+def _actions_from_listing(browser, client, page_url, page_delay):
+    """Render a BepisDB listing/user page in the selected browser and discover files."""
+    try:
+        html, final_url = browser.open_rendered(page_url, page_delay)
+    except Exception as exc:
+        print(f"Page request failed: {exc}")
+        return [], (), False, None
+
+    client.sync_browser_cookies(browser.cookies())
+
+    detail_links = _discover_detail_links(html, final_url)
+    actions = []
+    for detail_url in detail_links:
+        # Do not guess the file URL. Keep the detail URL and resolve it through
+        # the live browser when it is actually processed.
+        actions.append((detail_url, _numeric_id_from_url(detail_url)))
+
+    if not actions:
+        # If a listing directly exposes rendered Download links, retain them.
+        for action in _discover_download_actions(html, final_url):
+            actions.append((action, _numeric_id_from_url(action.url)))
+
+    signature = tuple(
+        item if isinstance(item, str) else item.url
+        for item, _ in actions
+    )
+    current_page = 1
+    try:
+        page_value = dict(
+            parse_qsl(urlsplit(page_url).query, keep_blank_values=True)
+        ).get("page")
+        if page_value and str(page_value).isdigit():
+            current_page = int(page_value)
+    except Exception:
+        pass
+
+    has_next, last_page = _listing_pagination_state(
+        browser, current_page, len(actions)
+    )
+    return actions, signature, has_next, last_page
+
+
+
+def _user_page_rows(browser):
+    """Read each User Page card ID from its /view/<id> link without opening it."""
+    rows, seen = [], set()
+    for link in browser.driver.find_elements(
+        By.CSS_SELECTOR, "a[href*='/koikatsu/view/'],a[href*='/aishoujo/view/']"
+    ):
+        try:
+            href=link.get_attribute("href") or ""
+            m=re.

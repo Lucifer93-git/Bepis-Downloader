@@ -259,4 +259,255 @@ def run_url_mode(game: str) -> None:
         return
     pasted_url, detected = result
 
-    if pas
+    if pasted_url:
+        show_detected_search(game, detected)
+        show_hidden = ask_yes_no("Show hidden cards?", allow_back=True)
+        if show_hidden is None: return
+        print()
+        start_page = ask_start_page(allow_back=True)
+        if start_page is None: return
+        run_download({
+            "mode": "game", "game": game, "label": label,
+            "search_source": "BepisDB URL", "url": pasted_url,
+            "name": detected.get("name", ""), "tags": detected.get("tags", ""),
+            "author": detected.get("author", ""), "gender": detected.get("gender", ""),
+            "personality": detected.get("personality", ""), "show_hidden": show_hidden,
+            "start_from": start_page,
+        })
+        return
+
+    name = _manual_value("Name")
+    if name is None: return
+    tags_raw = _manual_value("Tags")
+    if tags_raw is None: return
+    tags = ", ".join(normalize_tags(tags_raw))
+    author = ""
+    if game == "KK":
+        author = _manual_value("Card Author")
+        if author is None: return
+
+    # Gender needs validation while still allowing 'B'.
+    while True:
+        print("\nGender (Male, Female):")
+        raw_gender = input("> ").strip()
+        if _is_back(raw_gender): return
+        try:
+            gender = normalize_gender(raw_gender)
+            break
+        except ValueError:
+            print("Please enter Male (M) or Female (F), press Enter to skip, or 'B' to go back.")
+
+    personality = _manual_value("Personality")
+    if personality is None: return
+    print()
+    show_hidden = ask_yes_no("Show hidden cards?", allow_back=True)
+    if show_hidden is None: return
+    print()
+    start_page = ask_start_page(allow_back=True)
+    if start_page is None: return
+    run_download({
+        "mode": "game", "game": game, "label": label, "search_source": "Manual",
+        "url": "", "name": name, "tags": tags, "author": author,
+        "gender": gender, "personality": personality, "show_hidden": show_hidden,
+        "start_from": start_page,
+    })
+
+
+def run_game(game: str) -> None:
+    """Game submenu keeps URL, Card, and Scene downloads separate."""
+    label = _game_label(game)
+    while True:
+        print(f"\n{label}")
+        print("\n1. URL")
+        print("2. Card")
+        print("3. Scene")
+        print("4. Back")
+        choice = input("\n> ").strip()
+        if choice == "1":
+            run_url_mode(game)
+        elif choice == "2":
+            run_direct_mode(game, "card")
+        elif choice == "3":
+            run_direct_mode(game, "scene")
+        elif choice == "4":
+            return
+        else:
+            print("\nPlease select an option from 1 to 4.")
+
+
+# ---------------------------------------------------------------------------
+# User Page workflow
+# ---------------------------------------------------------------------------
+def run_user_page() -> None:
+    """Validate a BepisDB /user/<id> URL before any browser/folder work begins."""
+    print("\nUser Page")
+    print("\nNOTE:")
+    print("- Paste a BepisDB user profile URL.")
+    print("- Y/N answers are not case-sensitive. Press Enter for No.")
+    print("- Existing folders will be reused.")
+    print("- Existing completed cards will be skipped.")
+    print("- Incomplete .part files will not count as completed downloads.")
+    print("- Enter 'B' to go back. (Not case sensitive).\n")
+
+    while True:
+        print("User Page URL:")
+        raw = input("> ").strip()
+        if _is_back(raw):
+            return
+        ok, message, normalized = validate_user_url(raw)
+        if ok:
+            break
+        print(f"\n{message}\n")
+
+    print()
+    show_hidden = ask_yes_no("Show hidden cards?", allow_back=True)
+    if show_hidden is None:
+        return
+    print()
+    page_selection = ask_user_page_range(allow_back=True)
+    if page_selection is None:
+        return
+    start_page, end_page = page_selection
+
+    run_download(
+        {
+            "mode": "user",
+            "url": normalized,
+            "show_hidden": show_hidden,
+            "start_from": start_page,
+            "end_at": end_page,
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
+# Options menu and persistent config editing
+# ---------------------------------------------------------------------------
+BROWSER_OPTIONS = {
+    "1": ("chrome", "Google Chrome"),
+    "2": ("edge", "Microsoft Edge"),
+    "3": ("firefox", "Firefox"),
+}
+
+
+def select_browser() -> None:
+    """Choose which installed browser Selenium will control."""
+    while True:
+        current = load_config().get("browser", "firefox")
+        labels = {"chrome": "Google Chrome", "edge": "Microsoft Edge", "firefox": "Firefox"}
+        print("\nSelect browser")
+        print(f"\nCurrent: {labels.get(current, current)}\n")
+        print("1. Google Chrome")
+        print("2. Microsoft Edge")
+        print("3. Firefox")
+        print("4. Back")
+
+        choice = input("\n> ").strip()
+        if choice == "4":
+            return
+        if choice in BROWSER_OPTIONS:
+            value, label = BROWSER_OPTIONS[choice]
+            save_config_value("browser", value)
+            print(f"\nBrowser set to {label}.")
+            print("Setting saved.")
+            return
+        print("\nPlease select an option from 1 to 4.")
+
+
+def change_page_delay() -> None:
+    """Keep the original page-load delay configurable with a 5-second minimum."""
+    current = load_config()["website_load_interval"]
+    print(f"\nCurrent page load delay: {current} seconds")
+    print("Minimum allowed: 5 seconds")
+    while True:
+        value = input("\nEnter new delay in seconds:\n> ").strip()
+        if not value:
+            print("\nNo changes made.")
+            return
+        try:
+            seconds = int(value)
+        except ValueError:
+            print("\nPlease enter a whole number of 5 or higher.")
+            continue
+        if seconds < 5:
+            print("\nDelay cannot be less than 5 seconds.")
+            continue
+        save_config_value("website_load_interval", str(seconds))
+        print(f"\nPage load delay is now {seconds} seconds.")
+        print("Setting saved.")
+        return
+
+
+def options_menu() -> None:
+    labels = {"chrome": "Google Chrome", "edge": "Microsoft Edge", "firefox": "Firefox"}
+    while True:
+        config = load_config()
+        browser = labels.get(config.get("browser", "firefox"), "Firefox")
+
+        print("\nOptions")
+        print("\nNOTE:")
+        print("- The selected browser is used for the downloader session.")
+        print("- The browser stays open after downloading by default.")
+        print("- Changes are saved and remembered the next time you run the downloader.\n")
+        close_browser = str(config.get("close_browser_after_download", "0")).strip() == "1"
+        print(f"1. Browser: {browser}")
+        print(f"2. Page load delay: {config['website_load_interval']} seconds")
+        print(f"3. Close browser after download: {'Yes' if close_browser else 'No'}")
+        print("4. Restore defaults")
+        print("5. Back")
+
+        choice = input("\n> ").strip()
+        if choice == "1":
+            select_browser()
+        elif choice == "2":
+            change_page_delay()
+        elif choice == "3":
+            save_config_value("close_browser_after_download", "0" if close_browser else "1")
+            print(f"\nClose browser after download: {'No' if close_browser else 'Yes'}")
+            print("Setting saved.")
+        elif choice == "4":
+            print()
+            if ask_yes_no("Restore all downloader options to their defaults?"):
+                restore_default_config()
+                print("\nDefaults restored.")
+            else:
+                print("\nNo changes made.")
+        elif choice == "5":
+            return
+        else:
+            print("\nPlease select an option from 1 to 5.")
+
+
+# ---------------------------------------------------------------------------
+# Main menu
+# ---------------------------------------------------------------------------
+def menu() -> None:
+    """Top-level menu intentionally contains only the two requested games."""
+    while True:
+        print(f"\nBepisDB Downloader {APP_VERSION}")
+        print("Original project by 0AwsD0 | Updated by LuC!f3r")
+        print("-" * 38)
+        print("1. Koikatsu (KK)")
+        print("2. AI Shoujo / Honey Select 2 (AI/HS2)")
+        print("3. User Page")
+        print("4. Exit")
+        print("5. Options")
+
+        choice = input("\n> ").strip()
+        if choice == "1":
+            run_game("KK")
+        elif choice == "2":
+            run_game("AI_HS2")
+        elif choice == "3":
+            run_user_page()
+        elif choice == "4":
+            print("Goodbye.")
+            return
+        elif choice == "5":
+            options_menu()
+        else:
+            print("\nPlease select an option from 1 to 5.")
+
+
+if __name__ == "__main__":
+    menu()

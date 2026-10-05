@@ -910,4 +910,333 @@ class BepisBrowser:
                 except OSError:
                     continue
 
-            
+                old_state = before.get(path.name)
+                if old_state is None or state != old_state:
+                    changed.append(path)
+                    seen.add(path.name)
+
+                    if last_state.get(path.name) != state:
+                        last_progress = now
+
+                last_state[path.name] = state
+
+            tmp = [p for p in changed if p.name.casefold().endswith(temps)]
+            png = [p for p in changed if p.suffix.casefold() == ".png"]
+
+            if png and not tmp:
+                newest = max(png, key=lambda p: p.stat().st_mtime)
+                return "downloaded", newest.name, newest
+
+            # Only fail when the download has stopped changing for 3 minutes.
+            if now - last_progress >= idle_timeout:
+                break
+
+            # Safety cap for pathological cases.
+            if now - start_time >= absolute_timeout:
+                break
+
+            time.sleep(.5)
+
+        leftovers = [
+            destination / name
+            for name in seen
+            if (destination / name).exists()
+            and name.casefold().endswith(temps)
+        ]
+
+        if not seen:
+            reason = "Download control was clicked, but no new file appeared."
+        elif time.time() - start_time >= absolute_timeout:
+            reason = "Download exceeded the 15-minute safety limit."
+        else:
+            reason = "Download stopped making progress for 3 minutes."
+
+        return "failed", reason, leftovers
+
+    def close(self) -> None:
+        try: self.driver.quit()
+        except Exception: pass
+
+
+# ---------------------------------------------------------------------------
+# Direct HTTP client and safe file downloads
+# ---------------------------------------------------------------------------
+class BepisHTTPClient:
+    """Small cookie-aware HTTP client using only Python's standard library."""
+
+    def __init__(self):
+        self.cookies = http.cookiejar.CookieJar()
+        self.opener = build_opener(HTTPCookieProcessor(self.cookies))
+        self.headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/140.0 Safari/537.36"
+            ),
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+
+    def open(self, url: str, method: str = "GET", fields: tuple[tuple[str, str], ...] = (), timeout: int = 45):
+        data = None
+        actual_url = url
+        method = (method or "GET").upper()
+
+        if fields:
+            encoded = urlencode(list(fields))
+            if method == "GET":
+                parts = urlsplit(url)
+                existing = parse_qsl(parts.query, keep_blank_values=True)
+                actual_url = urlunsplit((
+                    parts.scheme,
+                    parts.netloc,
+                    parts.path,
+                    urlencode(existing + list(fields)),
+                    parts.fragment,
+                ))
+            else:
+                data = encoded.encode("utf-8")
+
+        headers = dict(self.headers)
+        if data is not None:
+            headers["Content-Type"] = "application/x-www-form-urlencoded"
+
+        req = Request(actual_url, data=data, headers=headers, method=method)
+        return self.opener.open(req, timeout=timeout)
+
+    def sync_browser_cookies(self, cookies: list[dict]) -> None:
+        """Copy the automated browser session cookies into this HTTP client."""
+        for item in cookies or []:
+            name = item.get("name")
+            value = item.get("value")
+            if not name:
+                continue
+            domain = item.get("domain") or "db.bepis.moe"
+            path = item.get("path") or "/"
+            secure = bool(item.get("secure", False))
+            cookie = http.cookiejar.Cookie(
+                version=0,
+                name=name,
+                value=value or "",
+                port=None,
+                port_specified=False,
+                domain=domain,
+                domain_specified=True,
+                domain_initial_dot=domain.startswith("."),
+                path=path,
+                path_specified=True,
+                secure=secure,
+                expires=item.get("expiry"),
+                discard=item.get("expiry") is None,
+                comment=None,
+                comment_url=None,
+                rest={},
+                rfc2109=False,
+            )
+            try:
+                self.cookies.set_cookie(cookie)
+            except Exception:
+                pass
+
+    def get_text(self, url: str, timeout: int = 45) -> tuple[str, str]:
+        with self.open(url, timeout=timeout) as response:
+            raw = response.read()
+            content_type = response.headers.get_content_type()
+            charset = response.headers.get_content_charset() or "utf-8"
+            if content_type not in {"text/html", "application/xhtml+xml", "text/plain"}:
+                # Decode anyway for tolerant error pages, but caller can still inspect.
+                charset = charset or "utf-8"
+            return raw.decode(charset, errors="replace"), response.geturl()
+
+
+def _sanitize_filename(name: str) -> str:
+    name = Path(str(name or "").replace("\\", "/")).name.strip()
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name)
+    name = name.rstrip(" .")
+    return name or "bepis_download"
+
+
+def _filename_from_response(response, action: DownloadAction) -> str:
+    """Prefer Content-Disposition, then HTML download=, then URL basename."""
+    try:
+        filename = response.headers.get_filename() or ""
+    except Exception:
+        filename = ""
+    if not filename:
+        filename = action.suggested_name
+    if not filename:
+        filename = Path(urlsplit(response.geturl()).path).name
+    if not filename:
+        filename = "bepis_download"
+    return _sanitize_filename(filename)
+
+
+def _download_action(client, action, destination):
+    """Download to .part; rename only after the full HTTP response is complete."""
+    part_path = None
+    try:
+        response = client.open(action.url, action.method, action.fields)
+    except HTTPError as exc:
+        return "failed", f"HTTP {exc.code}", None, None
+    except (URLError, OSError) as exc:
+        return "failed", str(exc), None, None
+
+    try:
+        with response:
+            ctype = (response.headers.get_content_type() or "").casefold()
+            filename = _filename_from_response(response, action)
+            if ctype in {"text/html", "application/xhtml+xml"}:
+                return "failed", "Download link returned an HTML page.", None, None
+
+            existing = _existing_file_case_insensitive(destination, filename)
+            if existing:
+                return "skipped", existing.name, None, existing
+
+            final_path = destination / filename
+            part_path = destination / f"{filename}.part"
+            with part_path.open("wb") as handle:
+                while True:
+                    chunk = response.read(1024 * 128)
+                    if not chunk:
+                        break
+                    handle.write(chunk)
+
+            os.replace(part_path, final_path)
+            if final_path.suffix.casefold() != ".png" or not final_path.exists():
+                return "failed", "Completed file could not be verified as .png.", part_path, final_path
+            return "downloaded", final_path.name, None, final_path
+    except Exception as exc:
+        # Intentionally leave this run's .part file in place until batch cleanup.
+        return "failed", str(exc), part_path, None
+
+
+def _fetch_page(client, url, page_delay):
+    try:
+        html, final_url = client.get_text(url)
+    except HTTPError as exc:
+        if exc.code == 404:
+            return None
+        print(f"Page request failed (HTTP {exc.code}): {url}")
+        return None
+    except (URLError, OSError) as exc:
+        print(f"Page request failed: {exc}")
+        return None
+    time.sleep(page_delay)
+    return html, final_url
+
+
+
+
+def _expected_filename(prefix: str, number: int) -> str:
+    """Return BepisDB's canonical PNG filename for a known card/scene ID."""
+    return f"{prefix.upper()}_{int(number):06d}.png"
+
+
+def _expected_filename_from_detail_url(url: str) -> str | None:
+    """Infer the canonical BepisDB filename from a card/scene detail URL."""
+    path = urlsplit(url).path.rstrip("/")
+    match = re.search(
+        r"/(koikatsu|kkscenes|aishoujo|aiscenes)/view/(\d+)$",
+        path,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+
+    route = match.group(1).casefold()
+    number = int(match.group(2))
+    prefixes = {
+        "koikatsu": "KK",
+        "kkscenes": "KKSCENE",
+        "aishoujo": "AI",
+        "aiscenes": "AISCENE",
+    }
+    return _expected_filename(prefixes[route], number)
+
+
+def _existing_expected_png(destination: Path, expected_name: str | None):
+    """Find an already completed expected PNG case-insensitively."""
+    if not expected_name:
+        return None
+    return _existing_file_case_insensitive(destination, expected_name)
+
+
+def _download_direct_id(browser, client, item, destination, page_delay):
+    """Open one direct ID, skip exact existing PNGs, and include hidden cards."""
+    expected_name = _expected_filename(item["prefix"], item["number"])
+    existing = _existing_expected_png(destination, expected_name)
+    if existing:
+        return ("skipped", existing.name, None, existing)
+
+    detail_url = item["url"]
+
+    try:
+        browser.open_rendered(detail_url, page_delay)
+    except Exception as exc:
+        return ("failed", f"Could not open detail page: {exc}", None, None)
+
+    status, message, payload = browser.click_download_and_wait()
+    if status == "downloaded":
+        return ("downloaded", message, None, payload)
+
+    temp_path = payload[0] if payload else None
+    return ("failed", message, temp_path, None)
+
+
+
+def _resolve_detail_download_action(client, detail_url: str):
+    """Open one BepisDB detail page and return its real download action.
+
+    Direct ID mode deliberately resolves the site's own Download control instead
+    of guessing a /card/download/<prefix>_<id>.png URL.
+    """
+    try:
+        html, final_url = client.get_text(detail_url)
+    except HTTPError as exc:
+        return None, f"HTTP {exc.code} while opening detail page"
+    except (URLError, OSError) as exc:
+        return None, f"Could not open detail page: {exc}"
+
+    actions = _discover_download_actions(html, final_url)
+    if not actions:
+        return None, "No download link found on detail page"
+
+    # Prefer the normal BepisDB card download endpoint when multiple controls exist.
+    for action in actions:
+        if "/card/download/" in urlsplit(action.url).path.casefold():
+            return action, ""
+    return actions[0], ""
+
+
+def _numeric_id_from_url(url: str) -> str:
+    m = re.search(r"(?:view/|_(\d+)\.png$)(\d+)?", urlsplit(url).path, re.I)
+    if not m:
+        m = re.search(r"(\d+)", urlsplit(url).path)
+    return (m.group(1) or m.group(2)) if m else "Unknown"
+
+
+class BatchSession:
+    """Tracks failures, successful files, cleanup paths, and silent/visible waits."""
+    def __init__(self, client, destination):
+        self.client = client
+        self.destination = destination
+        self.downloaded = 0
+        self.skipped = 0
+        self.failed_ids = []
+        self.cleanup_paths = []
+        self.completed_files = []
+        self.processed = 0
+
+    def process(self, action, display_id):
+        status, message, part_path, final_path = _download_action(self.client, action, self.destination)
+        self.processed += 1
+
+        if status == "downloaded":
+            self.downloaded += 1
+            self.completed_files.append(final_path)
+            print(f"{display_id}: Downloaded")
+        elif status == "skipped":
+            self.skipped += 1
+            print(f"{display_id}: Already exists - skipped")
+        else:
+            self.failed_ids.append(str(display_id))
+           

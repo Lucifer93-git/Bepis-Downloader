@@ -1879,4 +1879,60 @@ def run_download(data: dict) -> dict:
                 previous = sig
 
                 for i, (item, ident) in enumerate(items):
-                    status = _process_listin
+                    status = _process_listing_item(
+                        session, browser, client, item, ident, page_delay,
+                        bool(data.get("show_hidden"))
+                    )
+                    has_more = (i < len(items) - 1) or has_next
+                    session.wait_after_item(has_more, status)
+
+                if not has_next:
+                    break
+                if last_page is not None and page_number >= last_page:
+                    break
+                page_number += 1
+
+    except KeyboardInterrupt:
+        print("\nDownload interrupted.")
+    except Exception as exc:
+        print(f"\nUnexpected downloader error: {exc}")
+    finally:
+        if str(config.get("close_browser_after_download", "0")).strip() == "1":
+            browser.close()
+
+    session.cleanup()
+    session.verify()
+    result = session.result()
+
+    print("\n" + "-" * 40)
+    if result["failed_ids"]:
+        print("Download failed.\n")
+    else:
+        print("Download complete.\n")
+    print(f"Downloaded: {result['downloaded']}")
+    print(f"Skipped existing: {result['skipped']}")
+    if result["failed_ids"]:
+        print(f"Failed: {len(result['failed_ids'])}\n")
+        print("Failed IDs:")
+        for ident in result["failed_ids"]:
+            print(f"  {ident}")
+    print("-" * 40)
+    return result
+
+
+
+def download(**data):
+    return run_download(data)
+
+
+def user_download(url, start_from="", show_hidden=False):
+    try:
+        page = int(start_from) if str(start_from).strip() else 1
+    except ValueError:
+        page = 1
+    return run_download({
+        "mode": "user",
+        "url": url,
+        "show_hidden": show_hidden,
+        "start_from": max(1, page),
+    })

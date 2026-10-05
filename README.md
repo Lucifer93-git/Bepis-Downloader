@@ -1,4 +1,4 @@
-# BepisDB Downloader — compatibility update r29
+# BepisDB Downloader — compatibility update r30
 
 Original project: **BepisDB-downloader by 0AwsD0**  
 https://github.com/0AwsD0/BepisDB-downloader
@@ -203,3 +203,32 @@ r16 clicks the visible rendered Download control instead of requiring a conventi
 - Removed the temporary `Downloading directly from User Page...` troubleshooting line.
 - Successful downloads retain the useful elapsed time, e.g. `Downloaded (3.1s)`.
 - Direct User Page download behavior, 3-second pacing, 5-second every-10 pause, hidden-card handling, and other modes are otherwise unchanged.
+
+
+## r30 automatic GitHub updater
+
+A new `updater.py` launcher can check this GitHub repository before starting the downloader.
+
+Recommended startup:
+
+```bash
+python updater.py
+```
+
+Behavior:
+
+- Checks `version.txt` on GitHub.
+- Shows the installed and latest version.
+- Offers **Update now**, **Skip this update**, or **Exit**.
+- Downloads the new program files directly from GitHub; users do not need to download a release ZIP for normal updates.
+- Updates `main.py`, `download.py`, `requirements.txt`, `README.md`, `updater.py`, and `version.txt`.
+- **Never overwrites `config.ini`**, so browser choice, delay, and other user settings are preserved.
+- Downloads the complete update before replacing installed files.
+- Attempts to roll back replaced files if an update fails midway.
+- If `requirements.txt` changed, runs the current Python interpreter with `-m pip install -r requirements.txt`.
+- If GitHub is unavailable, starts the currently installed downloader normally.
+- The updater itself can be updated by future releases.
+
+### First-time setup
+
+Existing users only need to download/copy `updater.py` and `version.txt` once (or get r30 normally). After that, run `updater.py` instead of `main.py` for routine updates.

@@ -597,4 +597,317 @@ def _existing_file_case_insensitive(directory: Path, filename: str) -> Path | No
 # ---------------------------------------------------------------------------
 # Lightweight HTML discovery
 # ---------------------------------------------------------------------------
-# The curren
+# The current site exposes ordinary HTML links/buttons. This parser deliberately
+# stays broad so small markup changes do not require a browser/WebDriver.
+@dataclass
+class LinkItem:
+    href: str
+    text: str = ""
+    download_name: str = ""
+
+
+@dataclass
+class FormItem:
+    action: str
+    method: str = "GET"
+    text: str = ""
+    fields: dict[str, str] = field(default_factory=dict)
+
+
+class BepisHTMLParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.links: list[LinkItem] = []
+        self.forms: list[FormItem] = []
+        self._a: dict | None = None
+        self._a_text: list[str] = []
+        self._form: dict | None = None
+        self._form_text: list[str] = []
+
+    @staticmethod
+    def _attrs(attrs):
+        return {str(k).lower(): (v or "") for k, v in attrs}
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        a = self._attrs(attrs)
+
+        if tag == "a":
+            self._a = a
+            self._a_text = []
+
+        if tag == "form":
+            self._form = {
+                "action": a.get("action", ""),
+                "method": (a.get("method", "GET") or "GET").upper(),
+                "fields": {},
+            }
+            self._form_text = []
+
+        if self._form is not None and tag == "input":
+            name = a.get("name", "")
+            if name:
+                input_type = a.get("type", "text").lower()
+                if input_type in {"hidden", "submit"}:
+                    self._form["fields"][name] = a.get("value", "")
+
+        if self._form is not None and tag in {"button", "input"}:
+            value = a.get("value", "")
+            if value:
+                self._form_text.append(value)
+
+    def handle_data(self, data):
+        if self._a is not None:
+            self._a_text.append(data)
+        if self._form is not None:
+            self._form_text.append(data)
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+        if tag == "a" and self._a is not None:
+            self.links.append(LinkItem(
+                href=self._a.get("href", ""),
+                text=" ".join("".join(self._a_text).split()),
+                download_name=self._a.get("download", ""),
+            ))
+            self._a = None
+            self._a_text = []
+
+        if tag == "form" and self._form is not None:
+            self.forms.append(FormItem(
+                action=self._form["action"],
+                method=self._form["method"],
+                text=" ".join("".join(self._form_text).split()),
+                fields=dict(self._form["fields"]),
+            ))
+            self._form = None
+            self._form_text = []
+
+
+@dataclass(frozen=True)
+class DownloadAction:
+    url: str
+    method: str = "GET"
+    fields: tuple[tuple[str, str], ...] = ()
+    suggested_name: str = ""
+
+
+DETAIL_PATH_RE = re.compile(
+    r"^/(?:koikatsu|kkscenes|aishoujo|aiscenes)/view/\d+/?$",
+    flags=re.IGNORECASE,
+)
+
+
+def _parse_html(html: str) -> BepisHTMLParser:
+    parser = BepisHTMLParser()
+    parser.feed(html)
+    return parser
+
+
+def _valid_http_link(base_url: str, href: str) -> str:
+    href = str(href or "").strip()
+    if not href or href.startswith(("#", "javascript:", "mailto:")):
+        return ""
+    absolute = urljoin(base_url, href)
+    parts = urlsplit(absolute)
+    if parts.scheme not in {"http", "https"}:
+        return ""
+    return absolute
+
+
+def _discover_download_actions(html: str, page_url: str) -> list[DownloadAction]:
+    """Find normal Download links and Download forms on a BepisDB page."""
+    parsed = _parse_html(html)
+    actions: list[DownloadAction] = []
+    seen: set[tuple] = set()
+
+    for link in parsed.links:
+        url = _valid_http_link(page_url, link.href)
+        if not url:
+            continue
+        text = link.text.strip().casefold()
+        href_folded = link.href.casefold()
+        if "/download/" not in href_folded and not text.startswith("download"):
+            continue
+        key = ("GET", url, ())
+        if key in seen:
+            continue
+        seen.add(key)
+        actions.append(DownloadAction(url=url, suggested_name=link.download_name))
+
+    for form in parsed.forms:
+        text = form.text.strip().casefold()
+        action_folded = form.action.casefold()
+        if "/download/" not in action_folded and "download" not in text:
+            continue
+        url = _valid_http_link(page_url, form.action or page_url)
+        if not url:
+            continue
+        fields = tuple(form.fields.items())
+        key = (form.method, url, fields)
+        if key in seen:
+            continue
+        seen.add(key)
+        actions.append(DownloadAction(url=url, method=form.method, fields=fields))
+
+    return actions
+
+
+def _discover_detail_links(html: str, page_url: str) -> list[str]:
+    """Find card/scene detail pages. User pages rely on this path."""
+    parsed = _parse_html(html)
+    result: list[str] = []
+    seen: set[str] = set()
+    for link in parsed.links:
+        url = _valid_http_link(page_url, link.href)
+        if not url:
+            continue
+        if urlsplit(url).netloc.lower() != "db.bepis.moe":
+            continue
+        if not DETAIL_PATH_RE.fullmatch(urlsplit(url).path):
+            continue
+        clean = urlunsplit((urlsplit(url).scheme, urlsplit(url).netloc, urlsplit(url).path, "", ""))
+        if clean in seen:
+            continue
+        seen.add(clean)
+        result.append(clean)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Selenium browser layer for JavaScript-rendered BepisDB pages
+# ---------------------------------------------------------------------------
+class BepisBrowser:
+    """Launch and control only the browser instance created by this downloader."""
+
+    def __init__(self, browser_name: str, download_dir: Path):
+        if webdriver is None:
+            raise RuntimeError("Selenium is not installed. Run: pip install -r requirements.txt")
+        self.browser_name = str(browser_name or "chrome").casefold()
+        self.download_dir = str(Path(download_dir).resolve())
+        self.driver = self._create_driver(self.browser_name, self.download_dir)
+        self.driver.set_page_load_timeout(45)
+
+    @staticmethod
+    def _create_driver(browser_name: str, download_dir: str):
+        try:
+            if browser_name == "chrome":
+                options = webdriver.ChromeOptions()
+                options.add_argument("--disable-notifications")
+                options.add_experimental_option("excludeSwitches", ["enable-logging"])
+                options.add_experimental_option("prefs", {
+                    "download.default_directory": download_dir,
+                    "download.prompt_for_download": False,
+                    "download.directory_upgrade": True,
+                    "safebrowsing.enabled": True,
+                })
+                return webdriver.Chrome(options=options)
+            if browser_name == "edge":
+                options = webdriver.EdgeOptions()
+                options.add_argument("--disable-notifications")
+                options.add_experimental_option("prefs", {
+                    "download.default_directory": download_dir,
+                    "download.prompt_for_download": False,
+                    "download.directory_upgrade": True,
+                    "safebrowsing.enabled": True,
+                })
+                return webdriver.Edge(options=options)
+            if browser_name == "firefox":
+                options = webdriver.FirefoxOptions()
+                options.set_preference("dom.webnotifications.enabled", False)
+                options.set_preference("browser.download.folderList", 2)
+                options.set_preference("browser.download.dir", download_dir)
+                options.set_preference("browser.download.useDownloadDir", True)
+                options.set_preference("browser.helperApps.neverAsk.saveToDisk", "image/png;application/octet-stream")
+                return webdriver.Firefox(options=options)
+            raise RuntimeError(f"Unsupported browser setting: {browser_name}")
+        except WebDriverException as exc:
+            label = BROWSER_LABELS.get(browser_name, browser_name)
+            raise RuntimeError(
+                f"{label} could not be started.\nMake sure the browser is installed and connected to the internet the first time Selenium Manager resolves its driver.\nError: {exc}"
+            ) from exc
+
+    def open_rendered(self, url: str, wait_seconds: int) -> tuple[str, str]:
+        self.driver.get(url)
+        try:
+            WebDriverWait(self.driver, max(10, wait_seconds)).until(
+                lambda d: d.execute_script("return document.readyState") == "complete"
+            )
+        except TimeoutException:
+            pass
+        time.sleep(max(5, int(wait_seconds)))
+        return self.driver.page_source, self.driver.current_url
+
+    def cookies(self) -> list[dict]:
+        try: return self.driver.get_cookies()
+        except Exception: return []
+
+    def find_download_control(self):
+        xpaths = [
+            "//a[contains(translate(normalize-space(.),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'download')]",
+            "//button[contains(translate(normalize-space(.),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'download')]",
+            "//*[@download]",
+            "//*[contains(translate(@title,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'download')]",
+            "//*[contains(translate(@aria-label,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'download')]",
+            "//*[contains(translate(@onclick,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'download')]",
+            "//input[contains(translate(@value,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'download')]",
+        ]
+        for xpath in xpaths:
+            try: elements=self.driver.find_elements(By.XPATH, xpath)
+            except Exception: continue
+            for e in elements:
+                try:
+                    if e.is_displayed() and e.is_enabled(): return e
+                except Exception: pass
+        return None
+
+    def click_download_and_wait(self, idle_timeout: int = 180, absolute_timeout: int = 900):
+        """Click Download and wait while the browser is still making progress.
+
+        A slow but active download should not fail just because it takes more than
+        three minutes. The idle timer resets whenever the browser download file
+        changes size or modification time.
+        """
+        destination = Path(self.download_dir)
+        before = {}
+        for path in destination.iterdir():
+            if path.is_file():
+                try:
+                    before[path.name] = (path.stat().st_size, path.stat().st_mtime_ns)
+                except OSError:
+                    pass
+
+        control = self.find_download_control()
+        if control is None:
+            return "failed", "No visible Download control was found on the rendered page.", []
+
+        try:
+            self.driver.execute_script(
+                "arguments[0].scrollIntoView({block:'center'});", control
+            )
+            time.sleep(.3)
+            try:
+                control.click()
+            except Exception:
+                self.driver.execute_script("arguments[0].click();", control)
+        except Exception as exc:
+            return "failed", f"Could not click Download control: {exc}", []
+
+        temps = (".crdownload", ".part", ".tmp", ".download")
+        start_time = time.time()
+        last_progress = start_time
+        last_state = {}
+        seen = set()
+
+        while True:
+            now = time.time()
+            current = [p for p in destination.iterdir() if p.is_file()]
+            changed = []
+
+            for path in current:
+                try:
+                    state = (path.stat().st_size, path.stat().st_mtime_ns)
+                except OSError:
+                    continue
+
+            

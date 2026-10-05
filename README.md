@@ -1,4 +1,4 @@
-# BepisDB Downloader — compatibility update r17
+# BepisDB Downloader — compatibility update r29
 
 Original project: **BepisDB-downloader by 0AwsD0**  
 https://github.com/0AwsD0/BepisDB-downloader
@@ -21,7 +21,7 @@ Supported browser choices:
 4. Back
 ```
 
-Microsoft Edge is the default.
+Firefox is the default.
 
 Selenium Manager is used so users do not need to manually download and point
 the program at ChromeDriver, EdgeDriver, or GeckoDriver. The selected browser

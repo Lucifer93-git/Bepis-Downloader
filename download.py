@@ -1560,4 +1560,323 @@ def _user_page_rows(browser):
     ):
         try:
             href=link.get_attribute("href") or ""
-            m=re.
+            m=re.search(r"/(koikatsu|aishoujo)/view/(\d+)",href,re.I)
+            if not m: continue
+            route,num=m.group(1).casefold(),int(m.group(2))
+            if (route,num) in seen: continue
+            container=browser.driver.execute_script("""
+              let e=arguments[0];
+              for(let i=0;e&&i<8;i++,e=e.parentElement){
+                if(e.querySelector("a.btn,button,a[download],a[href*='/download/']")) return e;
+              }
+              return arguments[0].parentElement;
+            """,link)
+            rows.append({"number":num,"prefix":"KK" if route=="koikatsu" else "AI",
+                         "container":container})
+            seen.add((route,num))
+        except Exception: pass
+    return rows
+
+def _user_page_download(browser, container):
+    """Hover a tile, click Download, and wait while Firefox is making progress.
+
+    There is no absolute time limit for an active transfer. The download only
+    fails after three minutes without any file-size or modification-time change.
+    """
+    dest = Path(browser.download_dir)
+    before = {}
+    for path in dest.iterdir():
+        if path.is_file():
+            try:
+                before[path.name] = (path.stat().st_size, path.stat().st_mtime_ns)
+            except OSError:
+                pass
+
+    try:
+        browser.driver.execute_script(
+            "arguments[0].scrollIntoView({block:'center'});", container
+        )
+        ActionChains(browser.driver).move_to_element(container).pause(.4).perform()
+    except Exception:
+        pass
+
+    control = None
+    for xpath in (
+        ".//a[contains(translate(normalize-space(.),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'download')]",
+        ".//button[contains(translate(normalize-space(.),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'download')]",
+        ".//*[@download]",
+        ".//a[contains(@href,'/download/')]",
+    ):
+        try:
+            for element in container.find_elements(By.XPATH, xpath):
+                if element.is_displayed() and element.is_enabled():
+                    control = element
+                    break
+        except Exception:
+            pass
+        if control is not None:
+            break
+
+    if control is None:
+        return "failed", "No Download button appeared for this card.", [], 0.0
+
+    clicked_at = time.time()
+    try:
+        try:
+            control.click()
+        except Exception:
+            browser.driver.execute_script("arguments[0].click();", control)
+    except Exception:
+        return "failed", "Could not click the Download button.", [], 0.0
+
+    temp_suffixes = (".crdownload", ".part", ".tmp", ".download")
+    idle_timeout = 180
+    last_progress = time.time()
+    states = {}
+    seen = set()
+
+    while True:
+        now = time.time()
+        changed = []
+        try:
+            files = [x for x in dest.iterdir() if x.is_file()]
+        except OSError:
+            files = []
+
+        for path in files:
+            try:
+                state = (path.stat().st_size, path.stat().st_mtime_ns)
+            except OSError:
+                continue
+            old_state = before.get(path.name)
+            if old_state is None or state != old_state:
+                changed.append(path)
+                seen.add(path.name)
+                if states.get(path.name) != state:
+                    last_progress = now
+            states[path.name] = state
+
+        temp_files = [x for x in changed if x.name.casefold().endswith(temp_suffixes)]
+        png_files = [x for x in changed if x.suffix.casefold() == ".png"]
+
+        if png_files and not temp_files:
+            newest = max(png_files, key=lambda x: x.stat().st_mtime)
+            return "downloaded", newest.name, newest, time.time() - clicked_at
+
+        # Keep waiting indefinitely while the browser file continues changing.
+        if now - last_progress >= idle_timeout:
+            break
+        time.sleep(.5)
+
+    leftovers = [
+        dest / name for name in seen
+        if (dest / name).exists() and name.casefold().endswith(temp_suffixes)
+    ]
+    reason = (
+        "Download did not start within 3 minutes."
+        if not seen else
+        "Download stopped making progress for 3 minutes."
+    )
+    return "failed", reason, leftovers, time.time() - clicked_at
+
+
+def _user_page_total_pages(browser, current_page):
+    """Determine the User Page total without relying on the fragile Next button.
+
+    BepisDB shows a "N cards found" count and serves 24 cards per page. That is
+    the primary source because it remains useful even when pagination markup is
+    unusual. Visible pagination numbers are used as a second source.
+    """
+    total = current_page
+    try:
+        body = browser.driver.find_element(By.TAG_NAME, "body").text or ""
+        match = re.search(r"([\d,]+)\s+cards?\s+found", body, re.I)
+        if match:
+            card_count = int(match.group(1).replace(",", ""))
+            if card_count > 0:
+                total = max(total, (card_count + 23) // 24)
+    except Exception:
+        pass
+
+    try:
+        elements = browser.driver.find_elements(By.CSS_SELECTOR, "a,button")
+    except Exception:
+        elements = []
+    for element in elements:
+        try:
+            if not element.is_displayed():
+                continue
+            text = (element.text or "").strip()
+            href = element.get_attribute("href") or ""
+            if text.isdigit():
+                # Pagination page numbers are small; card IDs are not buttons.
+                number = int(text)
+                if 1 <= number <= 100000:
+                    total = max(total, number)
+            match = re.search(r"(?:[?&])page=(\d+)", href, re.I)
+            if match:
+                total = max(total, int(match.group(1)))
+        except Exception:
+            pass
+    return total
+
+def _run_user_page_direct(browser, session, data, page_delay):
+    """Download directly from User Page tiles and navigate with explicit page URLs."""
+    page = max(1, int(data.get("start_from", 1)))
+    requested_end = data.get("end_at")
+    requested_end = int(requested_end) if requested_end is not None else None
+    previous = None
+    detected_total = None
+
+    while True:
+        page_url = apply_user_page_controls(
+            data["url"], bool(data.get("show_hidden")), page
+        )
+        browser.open_rendered(page_url, page_delay)
+
+        rows = _user_page_rows(browser)
+        sig = tuple((row["prefix"], row["number"]) for row in rows)
+        if not rows or sig == previous:
+            break
+        previous = sig
+
+        page_total = _user_page_total_pages(browser, page)
+        if detected_total is None or page_total > detected_total:
+            detected_total = page_total
+        effective_end = detected_total
+        if requested_end is not None:
+            effective_end = min(effective_end, requested_end)
+
+        print(f"\nPage {page} of {detected_total}")
+        print("----------------------------------------")
+
+        for index, row in enumerate(rows):
+            existing = _existing_expected_png(
+                session.destination,
+                _expected_filename(row["prefix"], row["number"]),
+            )
+            session.processed += 1
+            if existing:
+                session.skipped += 1
+                status = "skipped"
+                print(f'{row["number"]}: Already exists - skipped')
+            else:
+                status, message, payload, elapsed = _user_page_download(
+                    browser, row["container"]
+                )
+                if status == "downloaded":
+                    session.downloaded += 1
+                    session.completed_files.append(payload)
+                    print(f'{row["number"]}: Downloaded ({elapsed:.1f}s)')
+                else:
+                    session.failed_ids.append(str(row["number"]))
+                    if isinstance(payload, list):
+                        session.cleanup_paths.extend(payload)
+                    print(f'{row["number"]}: Download failed')
+                    print(f"Reason: {message}")
+
+            has_more = (index < len(rows) - 1) or (page < effective_end)
+            session.wait_after_item(has_more, status)
+
+        # Never probe beyond either the site's detected last page or a user range.
+        if page >= effective_end:
+            break
+        page += 1
+
+    return session
+
+def _process_listing_item(
+    session, browser, client, item, ident, page_delay, show_hidden=False
+):
+    """Process one listing item, skipping completed PNGs before clicking Download."""
+    if isinstance(item, str):
+        expected_name = _expected_filename_from_detail_url(item)
+        existing = _existing_expected_png(session.destination, expected_name)
+        if existing:
+            session.processed += 1
+            session.skipped += 1
+            print(f"{ident}: Already exists - skipped")
+            return "skipped"
+
+        detail_url = item
+        try:
+            browser.open_rendered(detail_url, page_delay)
+        except Exception as exc:
+            session.processed += 1
+            session.failed_ids.append(str(ident))
+            print(f"{ident}: Download failed")
+            print(f"Reason: Could not open detail page: {exc}")
+            return "failed"
+
+        status, message, payload = browser.click_download_and_wait()
+        session.processed += 1
+
+        if status == "downloaded":
+            session.downloaded += 1
+            session.completed_files.append(payload)
+            print(f"{ident}: Downloaded")
+            return "downloaded"
+        else:
+            session.failed_ids.append(str(ident))
+            if isinstance(payload, list):
+                session.cleanup_paths.extend(payload)
+            print(f"{ident}: Download failed")
+            print(f"Reason: {message}")
+            return "failed"
+
+    return session.process(item, ident)
+
+
+
+def run_download(data: dict) -> dict:
+    """Browser-render BepisDB pages, then download resolved files with safe HTTP writes."""
+    config = load_config()
+    destination = ask_save_location()
+    if destination is None:
+        return {"downloaded": 0, "skipped": 0, "failed_ids": []}
+
+    _print_summary(data, destination, config)
+    client = BepisHTTPClient()
+    session = BatchSession(client, destination)
+    page_delay = int(config["website_load_interval"])
+    browser_name = config.get("browser", "firefox")
+
+    try:
+        print(f"Opening {BROWSER_LABELS.get(browser_name, browser_name)}...")
+        browser = BepisBrowser(browser_name, destination)
+    except Exception as exc:
+        print("\nBrowser could not be started.")
+        print(f"Error: {exc}")
+        return {"downloaded": 0, "skipped": 0, "failed_ids": []}
+
+    try:
+        if data.get("mode") == "ids":
+            items = data.get("id_items", [])
+            total = len(items)
+            for index, item in enumerate(items, 1):
+                status = session.process_direct_id(browser, item, page_delay)
+                session.wait_after_item(index < total, status)
+
+        elif data.get("mode") == "user":
+            _run_user_page_direct(browser, session, data, page_delay)
+
+        else:
+            base_url = data.get("url") or build_manual_search_url(data["game"], data)
+            page_number = int(data.get("start_from", 1))
+            base_url = apply_run_controls(
+                base_url, bool(data.get("show_hidden")), page_number
+            )
+            previous = None
+            while True:
+                page_url = set_query_value(
+                    base_url, "page", page_number if page_number > 1 else None
+                )
+                items, sig, has_next, last_page = _actions_from_listing(
+                    browser, client, page_url, page_delay
+                )
+                if not sig or sig == previous:
+                    break
+                previous = sig
+
+                for i, (item, ident) in enumerate(items):
+                    status = _process_listin

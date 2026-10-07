@@ -70,9 +70,9 @@ def _remote_version() -> str:
 
 
 def _start_downloader() -> int:
-    main_file = _local_path("main.py")
+    main_file = _local_path("gui.py") if _local_path("gui.py").exists() else _local_path("main.py")
     if not main_file.exists():
-        print("\nmain.py was not found. Please restore the downloader files.")
+        print("\nThe downloader entry point was not found. Please restore the program files.")
         return 1
 
     print("\nStarting BepisDB Downloader...\n")

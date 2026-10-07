@@ -38,7 +38,7 @@ except ImportError:
     By = WebDriverWait = None
 
 
-APP_VERSION = "2026.10.05-r30"
+APP_VERSION = "2026.10.07-r31"
 PROJECT_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = PROJECT_DIR / "config.ini"
 BASE_URL = "https://db.bepis.moe"

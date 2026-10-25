@@ -1,13 +1,14 @@
-# BepisDB Downloader r31
+# BepisDB Downloader r32
 
 Original project: **BepisDB-downloader by 0AwsD0**  
 https://github.com/0AwsD0/BepisDB-downloader
 
 Updated by **LuC!f3r**.
 
-## r31
+## r32
 
-- New Windows desktop GUI based on the approved dark UI direction.
+- Windows GUI now includes a Bepis-style top banner and matching application/EXE icon.
+- Windows packaging now collects the full Selenium package and explicit Firefox/Chrome/Edge webdriver modules, fixing missing browser-module errors in the EXE.
 - Firefox remains the default browser.
 - User Page's proven direct-listing workflow is now reused by all listing/search downloads:
   - read the item ID from the rendered tile URL without opening every detail page;
@@ -21,7 +22,7 @@ Updated by **LuC!f3r**.
 - User Page hidden-card URLs continue using `uploaderId=<id>&includeHidden=true/false`.
 - Browser stays open by default. Only the downloader-created browser session is closed when that option is enabled.
 - Source users can run `updater.py` to update from GitHub without downloading another ZIP.
-- A GitHub Actions workflow builds the Windows EXE package.
+- A GitHub Actions workflow builds the Windows EXE package with the Bepis icon.
 
 ## Source
 

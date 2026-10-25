@@ -8,7 +8,7 @@ import sys
 import urllib.request
 import webbrowser
 from pathlib import Path
-from tkinter import filedialog, messagebox
+from tkinter import PhotoImage, filedialog, messagebox
 
 import customtkinter as ctk
 from PIL import Image, ImageDraw, ImageFilter
@@ -99,6 +99,19 @@ class BepisApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title(f"BepisDB Downloader {APP_VERSION} - LuC!f3r")
+
+        # Use the same BepisDB branding in the title bar/taskbar and the EXE.
+        try:
+            icon_ico = _asset_path("assets/app.ico")
+            if icon_ico.exists():
+                self.iconbitmap(str(icon_ico))
+            icon_png = _asset_path("assets/app-icon.png")
+            if icon_png.exists():
+                self._window_icon = PhotoImage(file=str(icon_png))
+                self.iconphoto(True, self._window_icon)
+        except Exception:
+            self._window_icon = None
+
         self.geometry("1380x860")
         self.minsize(1120, 720)
         self.configure(fg_color=BG)

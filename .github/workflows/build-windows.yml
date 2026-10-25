@@ -24,11 +24,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pyinstaller
+          pip install pyinstaller pillow
 
       - name: Build GUI executable
         run: |
-          pyinstaller --noconfirm --clean --windowed --onedir --name BepisDB-Downloader --collect-all customtkinter gui.py
+          pyinstaller --noconfirm --clean --windowed --onedir --name BepisDB-Downloader --collect-all customtkinter --collect-all selenium --hidden-import selenium.webdriver.firefox.options --hidden-import selenium.webdriver.firefox.service --hidden-import selenium.webdriver.chrome.options --hidden-import selenium.webdriver.chrome.service --hidden-import selenium.webdriver.edge.options --hidden-import selenium.webdriver.edge.service --add-data "assets/banner.jpg;assets" gui.py
           copy config.ini dist\BepisDB-Downloader\config.ini
           copy version.txt dist\BepisDB-Downloader\version.txt
           copy README.md dist\BepisDB-Downloader\README.md
@@ -36,11 +36,11 @@ jobs:
       - name: Create ZIP
         shell: pwsh
         run: |
-          Compress-Archive -Path dist\BepisDB-Downloader\* -DestinationPath BepisDB-Downloader-r31-Windows.zip -Force
+          Compress-Archive -Path dist\BepisDB-Downloader\* -DestinationPath BepisDB-Downloader-r32-Windows.zip -Force
 
       - name: Upload Windows build
         uses: actions/upload-artifact@v4
         with:
-          name: BepisDB-Downloader-r31-Windows
-          path: BepisDB-Downloader-r31-Windows.zip
+          name: BepisDB-Downloader-r32-Windows
+          path: BepisDB-Downloader-r32-Windows.zip
           if-no-files-found: error

@@ -4,12 +4,14 @@ import contextlib
 import io
 import queue
 import threading
+import sys
 import urllib.request
 import webbrowser
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
+from PIL import Image
 
 from download import (
     load_config,
@@ -38,6 +40,12 @@ PURPLE = "#7c3cff"
 BLUE = "#2f8cff"
 GREEN = "#22b573"
 ORANGE = "#f39a2f"
+
+
+def _asset_path(relative: str) -> Path:
+    """Return a bundled/source asset path; works in PyInstaller onedir builds."""
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    return base / relative
 
 
 class QueueWriter(io.TextIOBase):
@@ -74,12 +82,60 @@ class BepisApp(ctk.CTk):
         self.show_home()
 
     def _build_header(self):
+        """Build the top banner; gracefully falls back to the plain header."""
         header = ctk.CTkFrame(self, height=126, corner_radius=0, fg_color="#0d1a32")
         header.grid(row=0, column=0, columnspan=2, sticky="nsew")
-        header.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(header, text="◉", font=ctk.CTkFont(size=50), text_color="#8eb5ff").grid(row=0, column=0, rowspan=2, padx=(34, 18), pady=22)
-        ctk.CTkLabel(header, text="BepisDB Downloader", font=ctk.CTkFont(size=35, weight="bold"), text_color=TEXT).grid(row=0, column=1, sticky="sw", pady=(24, 0))
-        ctk.CTkLabel(header, text=f"{APP_VERSION}   •   Updated by LuC!f3r", font=ctk.CTkFont(size=16), text_color="#9db8ff").grid(row=1, column=1, sticky="nw", pady=(2, 20))
+        header.grid_propagate(False)
+
+        banner_path = _asset_path("assets/banner.jpg")
+        try:
+            banner = Image.open(banner_path)
+            self.header_banner_image = ctk.CTkImage(
+                light_image=banner,
+                dark_image=banner,
+                size=(1380, 126),
+            )
+            ctk.CTkLabel(
+                header,
+                text="",
+                image=self.header_banner_image,
+                fg_color="transparent",
+            ).place(x=0, y=0, relwidth=1, relheight=1)
+        except Exception:
+            self.header_banner_image = None
+
+        # Dark translucent-looking title panel keeps text readable over the art.
+        title_panel = ctk.CTkFrame(
+            header,
+            width=610,
+            height=126,
+            corner_radius=0,
+            fg_color="#0a1528",
+        )
+        title_panel.place(x=0, y=0)
+        title_panel.grid_propagate(False)
+        title_panel.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(
+            title_panel,
+            text="◉",
+            font=ctk.CTkFont(size=50),
+            text_color="#8eb5ff",
+        ).grid(row=0, column=0, rowspan=2, padx=(34, 18), pady=22)
+
+        ctk.CTkLabel(
+            title_panel,
+            text="BepisDB Downloader",
+            font=ctk.CTkFont(size=35, weight="bold"),
+            text_color=TEXT,
+        ).grid(row=0, column=1, sticky="sw", pady=(24, 0))
+
+        ctk.CTkLabel(
+            title_panel,
+            text=f"{APP_VERSION}   •   Updated by LuC!f3r",
+            font=ctk.CTkFont(size=16),
+            text_color="#9db8ff",
+        ).grid(row=1, column=1, sticky="nw", pady=(2, 20))
 
     def _build_sidebar(self):
         self.sidebar = ctk.CTkFrame(self, width=235, corner_radius=0, fg_color="#0b1423")

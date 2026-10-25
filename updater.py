@@ -35,6 +35,9 @@ VERSION_FILE = "version.txt"
 UPDATE_FILES = [
     "main.py",
     "download.py",
+    "gui.py",
+    "gui_backend.py",
+    "assets/app.ico",
     "requirements.txt",
     "README.md",
     "updater.py",
@@ -142,7 +145,9 @@ def _apply_update(latest: str) -> bool:
         # Download the entire update before replacing any installed file.
         for name in UPDATE_FILES:
             data = _download_bytes(name)
-            (stage_dir / name).write_bytes(data)
+            staged_target = stage_dir / name
+            staged_target.parent.mkdir(parents=True, exist_ok=True)
+            staged_target.write_bytes(data)
 
         # Sanity-check the staged version before touching the installed copy.
         staged_version = (stage_dir / VERSION_FILE).read_text(encoding="utf-8").strip()
@@ -163,6 +168,8 @@ def _apply_update(latest: str) -> bool:
                 target = root / name
                 staged = stage_dir / name
                 backup = backup_dir / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                backup.parent.mkdir(parents=True, exist_ok=True)
 
                 if target.exists():
                     shutil.copy2(target, backup)

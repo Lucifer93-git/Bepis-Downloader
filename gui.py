@@ -11,7 +11,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFilter
 
 from download import (
     load_config,
@@ -46,6 +46,40 @@ def _asset_path(relative: str) -> Path:
     """Return a bundled/source asset path; works in PyInstaller onedir builds."""
     base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
     return base / relative
+
+
+def _fallback_banner_image() -> Image.Image:
+    """Create a Bepis-style dark blue/purple banner when no external art exists."""
+    width, height = 1380, 126
+    image = Image.new("RGB", (width, height), "#0a1528")
+    draw = ImageDraw.Draw(image, "RGBA")
+
+    # Smooth navy-to-indigo background.
+    for x in range(width):
+        t = x / max(1, width - 1)
+        r = int(10 + 13 * t)
+        g = int(21 + 10 * t)
+        b = int(40 + 38 * t)
+        draw.line((x, 0, x, height), fill=(r, g, b, 255))
+
+    # Soft purple/blue glows echo the approved mockup without requiring an
+    # external banner file.
+    glow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    gd = ImageDraw.Draw(glow, "RGBA")
+    gd.ellipse((790, -110, 1160, 240), fill=(89, 70, 255, 95))
+    gd.ellipse((1030, -90, 1400, 230), fill=(44, 119, 255, 75))
+    gd.ellipse((620, -140, 910, 190), fill=(137, 66, 255, 50))
+    glow = glow.filter(ImageFilter.GaussianBlur(48))
+    image = Image.alpha_composite(image.convert("RGBA"), glow)
+
+    # Subtle database-disc motif on the right.
+    motif = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    md = ImageDraw.Draw(motif, "RGBA")
+    for i, alpha in enumerate((55, 40, 25)):
+        inset = i * 11
+        md.ellipse((1110 + inset, 18 + inset//2, 1335 - inset, 108 - inset//2),
+                   outline=(160, 192, 255, alpha), width=2)
+    return image.convert("RGB")
 
 
 class QueueWriter(io.TextIOBase):
@@ -89,20 +123,21 @@ class BepisApp(ctk.CTk):
 
         banner_path = _asset_path("assets/banner.jpg")
         try:
-            banner = Image.open(banner_path)
-            self.header_banner_image = ctk.CTkImage(
-                light_image=banner,
-                dark_image=banner,
-                size=(1380, 126),
-            )
-            ctk.CTkLabel(
-                header,
-                text="",
-                image=self.header_banner_image,
-                fg_color="transparent",
-            ).place(x=0, y=0, relwidth=1, relheight=1)
+            banner = Image.open(banner_path) if banner_path.exists() else _fallback_banner_image()
         except Exception:
-            self.header_banner_image = None
+            banner = _fallback_banner_image()
+
+        self.header_banner_image = ctk.CTkImage(
+            light_image=banner,
+            dark_image=banner,
+            size=(1380, 126),
+        )
+        ctk.CTkLabel(
+            header,
+            text="",
+            image=self.header_banner_image,
+            fg_color="transparent",
+        ).place(x=0, y=0, relwidth=1, relheight=1)
 
         # Dark translucent-looking title panel keeps text readable over the art.
         title_panel = ctk.CTkFrame(

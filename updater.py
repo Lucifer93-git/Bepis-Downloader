@@ -37,7 +37,7 @@ UPDATE_FILES = [
     "download.py",
     "gui.py",
     "gui_backend.py",
-    "assets/app.ico",
+    "assets/app-icon.png",
     "requirements.txt",
     "README.md",
     "updater.py",

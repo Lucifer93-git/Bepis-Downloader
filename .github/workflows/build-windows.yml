@@ -39,10 +39,10 @@ jobs:
         run: |
           $version = (Get-Content version.txt -Raw).Trim()
           $releaseTag = ""
-          if ("\${{ github.ref_type }}" -eq "tag") {
-            $releaseTag = "\${{ github.ref_name }}"
-          } elseif ("\${{ github.event_name }}" -eq "workflow_dispatch") {
-            $releaseTag = "\${{ inputs.release_tag }}"
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $releaseTag = "${{ github.ref_name }}"
+          } elseif ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $releaseTag = "${{ inputs.release_tag }}"
           }
           "version=$version" >> $env:GITHUB_OUTPUT
           "release_tag=$releaseTag" >> $env:GITHUB_OUTPUT
@@ -58,23 +58,23 @@ jobs:
       - name: Create ZIP
         shell: pwsh
         run: |
-          Compress-Archive -Path dist\BepisDB-Downloader\* -DestinationPath "\${{ steps.version.outputs.zip_name }}" -Force
+          Compress-Archive -Path dist\BepisDB-Downloader\* -DestinationPath "${{ steps.version.outputs.zip_name }}" -Force
 
       - name: Upload Windows build artifact
         uses: actions/upload-artifact@v4
         with:
           name: BepisDB-Downloader-Windows
-          path: \${{ steps.version.outputs.zip_name }}
+          path: ${{ steps.version.outputs.zip_name }}
           if-no-files-found: error
 
       - name: Attach ZIP to GitHub Release
         if: steps.version.outputs.release_tag != ''
         shell: pwsh
         env:
-          GH_TOKEN: \${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = "\${{ steps.version.outputs.release_tag }}"
-          $zip = "\${{ steps.version.outputs.zip_name }}"
+          $tag = "${{ steps.version.outputs.release_tag }}"
+          $zip = "${{ steps.version.outputs.zip_name }}"
 
           gh release view "$tag" | Out-Null
           if ($LASTEXITCODE -ne 0) {

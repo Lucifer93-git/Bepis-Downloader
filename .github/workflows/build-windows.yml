@@ -3,10 +3,17 @@ name: Build Windows EXE
 on:
   push:
     branches: [main]
+    tags:
+      - 'r*'
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Optional existing release tag to attach the Windows ZIP to (example: r32)'
+        required: false
+        type: string
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -26,6 +33,21 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller pillow
 
+      - name: Read version
+        id: version
+        shell: pwsh
+        run: |
+          $version = (Get-Content version.txt -Raw).Trim()
+          $releaseTag = ""
+          if ("\${{ github.ref_type }}" -eq "tag") {
+            $releaseTag = "\${{ github.ref_name }}"
+          } elseif ("\${{ github.event_name }}" -eq "workflow_dispatch") {
+            $releaseTag = "\${{ inputs.release_tag }}"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "release_tag=$releaseTag" >> $env:GITHUB_OUTPUT
+          "zip_name=BepisDB-Downloader-$version-Windows.zip" >> $env:GITHUB_OUTPUT
+
       - name: Build GUI executable
         run: |
           pyinstaller --noconfirm --clean --windowed --onedir --name BepisDB-Downloader --collect-all customtkinter --collect-all selenium --hidden-import selenium.webdriver.firefox.options --hidden-import selenium.webdriver.firefox.service --hidden-import selenium.webdriver.chrome.options --hidden-import selenium.webdriver.chrome.service --hidden-import selenium.webdriver.edge.options --hidden-import selenium.webdriver.edge.service --icon "assets/app-icon.png" --add-data "assets/app-icon.png;assets" gui.py
@@ -36,11 +58,28 @@ jobs:
       - name: Create ZIP
         shell: pwsh
         run: |
-          Compress-Archive -Path dist\BepisDB-Downloader\* -DestinationPath BepisDB-Downloader-r32-Windows.zip -Force
+          Compress-Archive -Path dist\BepisDB-Downloader\* -DestinationPath "\${{ steps.version.outputs.zip_name }}" -Force
 
-      - name: Upload Windows build
+      - name: Upload Windows build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: BepisDB-Downloader-r32-Windows
-          path: BepisDB-Downloader-r32-Windows.zip
+          name: BepisDB-Downloader-Windows
+          path: \${{ steps.version.outputs.zip_name }}
           if-no-files-found: error
+
+      - name: Attach ZIP to GitHub Release
+        if: steps.version.outputs.release_tag != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: \${{ github.token }}
+        run: |
+          $tag = "\${{ steps.version.outputs.release_tag }}"
+          $zip = "\${{ steps.version.outputs.zip_name }}"
+
+          gh release view "$tag" | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Release $tag does not exist yet. Creating it."
+            gh release create "$tag" "$zip" --title "Bepis Downloader $tag" --generate-notes
+          } else {
+            gh release upload "$tag" "$zip" --clobber
+          }

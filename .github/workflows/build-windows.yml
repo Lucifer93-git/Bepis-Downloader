@@ -54,7 +54,7 @@ jobs:
 
       - name: Build GUI executable
         run: |
-          pyinstaller --noconfirm --clean --windowed --onedir --name BepisDB-Downloader --collect-all customtkinter --collect-all selenium --hidden-import selenium.webdriver.firefox.options --hidden-import selenium.webdriver.firefox.service --hidden-import selenium.webdriver.chrome.options --hidden-import selenium.webdriver.chrome.service --hidden-import selenium.webdriver.edge.options --hidden-import selenium.webdriver.edge.service --icon "assets/app.ico" --add-data "assets/app-icon.png;assets" --add-data "assets/app.ico;assets" gui.py
+          pyinstaller --noconfirm --clean --windowed --onedir --name BepisDB-Downloader --collect-all customtkinter --collect-all selenium --hidden-import selenium.webdriver.firefox.options --hidden-import selenium.webdriver.firefox.service --hidden-import selenium.webdriver.chrome.options --hidden-import selenium.webdriver.chrome.service --hidden-import selenium.webdriver.edge.options --hidden-import selenium.webdriver.edge.service --icon "assets/app.ico" --add-data "assets/app-icon.png;assets" --add-data "assets/app.ico;assets" --add-data "assets/banner.jpg;assets" gui.py
           copy config.ini dist\BepisDB-Downloader\config.ini
           copy version.txt dist\BepisDB-Downloader\version.txt
           copy README.md dist\BepisDB-Downloader\README.md

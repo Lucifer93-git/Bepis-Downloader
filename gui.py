@@ -5,12 +5,14 @@ import io
 import queue
 import threading
 import sys
-import urllib.request
+import subprocess
 import webbrowser
 from pathlib import Path
 from tkinter import PhotoImage, filedialog, messagebox
 
 import customtkinter as ctk
+import certifi
+import requests
 from PIL import Image, ImageDraw, ImageFilter
 
 from download import (
@@ -542,24 +544,79 @@ class BepisApp(ctk.CTk):
         self.status_right.configure(text=f"Browser: {browser.title()}   |   Page delay: {value}s   |   {APP_VERSION}")
         messagebox.showinfo("Settings","Settings saved.")
 
+    def _fetch_remote_version(self):
+        """Fetch version.txt with packaged-app-friendly TLS and a Windows fallback."""
+        headers = {"User-Agent": "BepisDB-Downloader"}
+        primary_error = None
+
+        try:
+            response = requests.get(
+                REMOTE_VERSION,
+                headers=headers,
+                timeout=12,
+                verify=certifi.where(),
+            )
+            response.raise_for_status()
+            value = response.text.strip()
+            if value:
+                return value
+            raise RuntimeError("GitHub returned an empty version value.")
+        except Exception as exc:
+            primary_error = exc
+
+        # Windows 10/11 includes curl.exe. Using it as a fallback avoids Python
+        # TLS-stack quirks sometimes seen in packaged applications.
+        if sys.platform.startswith("win"):
+            try:
+                result = subprocess.run(
+                    ["curl.exe", "-fsSL", "--max-time", "15", REMOTE_VERSION],
+                    capture_output=True,
+                    text=True,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                    check=True,
+                )
+                value = result.stdout.strip()
+                if value:
+                    return value
+            except Exception:
+                pass
+
+        raise RuntimeError(str(primary_error) if primary_error else "Update check failed.")
+
     def check_updates(self):
         def job():
             try:
-                request=urllib.request.Request(REMOTE_VERSION,headers={"User-Agent":"BepisDB-Downloader"})
-                with urllib.request.urlopen(request,timeout=10) as response:
-                    latest=response.read().decode().strip()
+                latest = self._fetch_remote_version()
 
-                if latest==APP_VERSION:
-                    self.after(0,lambda:messagebox.showinfo("Updates",f"You're up to date: {APP_VERSION}"))
+                if latest == APP_VERSION:
+                    self.after(
+                        0,
+                        lambda: messagebox.showinfo(
+                            "Updates",
+                            f"You're up to date: {APP_VERSION}",
+                        ),
+                    )
                 else:
-                    self.after(0,lambda:messagebox.showinfo(
-                        "Update available",
-                        f"Installed: {APP_VERSION}\nLatest: {latest}\n\nRun updater.py for the source build, or download the newest Windows build from GitHub."
-                    ))
+                    self.after(
+                        0,
+                        lambda: messagebox.showinfo(
+                            "Update available",
+                            f"Installed: {APP_VERSION}\nLatest: {latest}\n\n"
+                            "Download the newest Windows build from GitHub.",
+                        ),
+                    )
             except Exception as exc:
-                self.after(0,lambda:messagebox.showerror("Update check",f"Could not check GitHub.\n\n{exc}"))
+                self.after(
+                    0,
+                    lambda: messagebox.showerror(
+                        "Update check",
+                        "Could not check GitHub.\n\n"
+                        f"{exc}\n\n"
+                        "You can still use the downloader normally.",
+                    ),
+                )
 
-        threading.Thread(target=job,daemon=True).start()
+        threading.Thread(target=job, daemon=True).start()
 
 
 if __name__ == "__main__":

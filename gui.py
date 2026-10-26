@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 import queue
-import threading
-import sys
+import shutil
 import subprocess
+import sys
+import tempfile
+import threading
 import webbrowser
+import zipfile
 from pathlib import Path
 from tkinter import PhotoImage, filedialog, messagebox
 
@@ -28,6 +32,7 @@ from gui_backend import APP_VERSION, prepare_destination, run_gui_download
 
 REPO_URL = "https://github.com/Lucifer93-git/Bepis-Downloader"
 REMOTE_VERSION = "https://raw.githubusercontent.com/Lucifer93-git/Bepis-Downloader/main/version.txt"
+RELEASE_API = "https://api.github.com/repos/Lucifer93-git/Bepis-Downloader/releases/tags/{tag}"
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -583,6 +588,192 @@ class BepisApp(ctk.CTk):
 
         raise RuntimeError(str(primary_error) if primary_error else "Update check failed.")
 
+    def _release_tag_for_version(self, version):
+        """Convert 2026.10.26-r34 to the GitHub release tag r34."""
+        value = str(version or "").strip()
+        if "-" not in value:
+            raise ValueError(f"Invalid version: {value}")
+        tag = value.rsplit("-", 1)[-1].strip()
+        if not tag.lower().startswith("r"):
+            raise ValueError(f"Invalid release tag in version: {value}")
+        return tag
+
+    def _release_info(self, version):
+        """Return the matching GitHub release and its Windows ZIP asset."""
+        tag = self._release_tag_for_version(version)
+        url = RELEASE_API.format(tag=tag)
+        response = requests.get(
+            url,
+            headers={"User-Agent": "BepisDB-Downloader"},
+            timeout=15,
+            verify=certifi.where(),
+        )
+        response.raise_for_status()
+        release = response.json()
+
+        asset = None
+        for item in release.get("assets", []):
+            name = str(item.get("name", ""))
+            if "windows" in name.casefold() and name.casefold().endswith(".zip"):
+                asset = item
+                break
+
+        if asset is None:
+            raise RuntimeError(f"No Windows ZIP is attached to the {tag} release.")
+        return release, asset
+
+    def _show_update_dialog(self, latest):
+        """Offer a real self-update instead of only telling users to download it."""
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Update available")
+        dialog.geometry("520x260")
+        dialog.resizable(False, False)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        ctk.CTkLabel(
+            dialog,
+            text="Update available",
+            font=ctk.CTkFont(size=24, weight="bold"),
+            text_color=TEXT,
+        ).pack(anchor="w", padx=28, pady=(24, 8))
+
+        ctk.CTkLabel(
+            dialog,
+            text=f"Installed: {APP_VERSION}\nLatest:    {latest}\n\n"
+                 "The Windows build can download and install this update automatically.",
+            justify="left",
+            text_color=MUTED,
+            font=ctk.CTkFont(size=15),
+        ).pack(anchor="w", padx=28, pady=(0, 18))
+
+        buttons = ctk.CTkFrame(dialog, fg_color="transparent")
+        buttons.pack(fill="x", padx=28, pady=(2, 22))
+
+        def update_now():
+            dialog.destroy()
+            self._begin_self_update(latest)
+
+        def open_release():
+            try:
+                tag = self._release_tag_for_version(latest)
+                webbrowser.open(f"{REPO_URL}/releases/tag/{tag}")
+            finally:
+                dialog.destroy()
+
+        ctk.CTkButton(
+            buttons, text="Update now", fg_color=GREEN, command=update_now
+        ).pack(side="left", padx=(0, 8))
+        ctk.CTkButton(
+            buttons, text="Later", fg_color="#46536a", command=dialog.destroy
+        ).pack(side="left", padx=8)
+        ctk.CTkButton(
+            buttons, text="Open release", fg_color=BLUE, command=open_release
+        ).pack(side="right")
+
+    def _begin_self_update(self, latest):
+        """Download the release ZIP, launch the helper, then close this EXE."""
+        if not getattr(sys, "frozen", False):
+            messagebox.showinfo(
+                "Source build",
+                "Automatic replacement is for the packaged Windows build.\n\n"
+                "For the source build, run updater.py.",
+            )
+            return
+
+        if self.worker and self.worker.is_alive():
+            messagebox.showinfo(
+                "Download running",
+                "Finish the current card download before updating.",
+            )
+            return
+
+        self.status.configure(text="● Updating...", text_color="#ffd27a")
+
+        def job():
+            temp_root = None
+            try:
+                release, asset = self._release_info(latest)
+                download_url = asset.get("browser_download_url")
+                if not download_url:
+                    raise RuntimeError("The Windows release asset has no download URL.")
+
+                temp_root = Path(tempfile.mkdtemp(prefix="bepis_self_update_"))
+                zip_path = temp_root / "update.zip"
+                extract_dir = temp_root / "extracted"
+                extract_dir.mkdir(parents=True, exist_ok=True)
+
+                with requests.get(
+                    download_url,
+                    headers={"User-Agent": "BepisDB-Downloader"},
+                    stream=True,
+                    timeout=(15, 120),
+                    verify=certifi.where(),
+                ) as response:
+                    response.raise_for_status()
+                    with zip_path.open("wb") as handle:
+                        for chunk in response.iter_content(chunk_size=1024 * 1024):
+                            if chunk:
+                                handle.write(chunk)
+
+                with zipfile.ZipFile(zip_path, "r") as archive:
+                    archive.extractall(extract_dir)
+
+                new_exe = extract_dir / "BepisDB-Downloader.exe"
+                if not new_exe.exists():
+                    raise RuntimeError("The downloaded Windows package is missing BepisDB-Downloader.exe.")
+
+                install_dir = Path(sys.executable).resolve().parent
+                installed_helper = install_dir / "BepisDB-Updater.exe"
+                if not installed_helper.exists():
+                    raise RuntimeError(
+                        "BepisDB-Updater.exe is missing from this installation. "
+                        "Install r34 manually once to enable future automatic updates."
+                    )
+
+                # Run the helper from temp so it can replace the installed copy too.
+                helper_copy = temp_root / "BepisDB-Updater.exe"
+                shutil.copy2(installed_helper, helper_copy)
+
+                subprocess.Popen(
+                    [
+                        str(helper_copy),
+                        "--source", str(extract_dir),
+                        "--target", str(install_dir),
+                        "--pid", str(os.getpid()),
+                        "--launch", "BepisDB-Downloader.exe",
+                    ],
+                    cwd=str(temp_root),
+                    creationflags=getattr(subprocess, "DETACHED_PROCESS", 0)
+                    | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                    | getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                    close_fds=True,
+                )
+
+                self.after(0, self.destroy)
+                return
+
+            except Exception as exc:
+                if temp_root is not None:
+                    shutil.rmtree(temp_root, ignore_errors=True)
+                message = str(exc)
+                self.after(
+                    0,
+                    lambda: messagebox.showerror(
+                        "Update failed",
+                        f"The automatic update could not be installed.\n\n{message}\n\n"
+                        "Your current installation was not replaced.",
+                    ),
+                )
+                self.after(
+                    0,
+                    lambda: self.status.configure(
+                        text="● Ready", text_color="#8fb6ff"
+                    ),
+                )
+
+        threading.Thread(target=job, daemon=True).start()
+
     def check_updates(self):
         def job():
             try:
@@ -597,14 +788,10 @@ class BepisApp(ctk.CTk):
                         ),
                     )
                 else:
-                    self.after(
-                        0,
-                        lambda: messagebox.showinfo(
-                            "Update available",
-                            f"Installed: {APP_VERSION}\nLatest: {latest}\n\n"
-                            "Download the newest Windows build from GitHub.",
-                        ),
-                    )
+                    # Confirm the release/Windows asset exists before offering
+                    # automatic installation.
+                    self._release_info(latest)
+                    self.after(0, lambda: self._show_update_dialog(latest))
             except Exception as exc:
                 self.after(
                     0,
@@ -617,6 +804,7 @@ class BepisApp(ctk.CTk):
                 )
 
         threading.Thread(target=job, daemon=True).start()
+
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-# BepisDB Downloader r32
+# BepisDB Downloader r34
 
 Original project: **BepisDB-downloader by 0AwsD0**  
 https://github.com/0AwsD0/BepisDB-downloader
@@ -49,3 +49,15 @@ README.md
 ```
 
 Chrome, Edge, or Firefox must already be installed. Firefox is the default.
+
+
+## r34
+
+- Added true self-update support for the packaged Windows build.
+- Update check now offers **Update now**, **Later**, and **Open release**.
+- **Update now** downloads the matching Windows ZIP from the GitHub Release.
+- The main app launches `BepisDB-Updater.exe`, exits, and the helper replaces the installed files.
+- `config.ini` is preserved during updates.
+- The helper relaunches `BepisDB-Downloader.exe` automatically when replacement finishes.
+- The Windows package now includes `BepisDB-Updater.exe`.
+- r34 must be installed manually once if upgrading from an older EXE build that does not yet contain the helper. Future updates can then install themselves.

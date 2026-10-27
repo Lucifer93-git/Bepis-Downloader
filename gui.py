@@ -292,7 +292,11 @@ class BepisApp(ctk.CTk):
         row = ctk.CTkFrame(parent, fg_color="transparent")
         row.pack(fill="x", padx=24, pady=8)
         ctk.CTkLabel(row, text="Save location", text_color=TEXT, width=110, anchor="w").pack(side="left")
-        path = ctk.StringVar(value=str(Path.home()/"Downloads"))
+        cfg = load_config()
+        default_path = cfg.get("default_save_location", "").strip()
+        path = ctk.StringVar(
+            value=default_path or str(Path.home()/"Downloads")
+        )
         ctk.CTkEntry(row, textvariable=path).pack(side="left", fill="x", expand=True, padx=8)
         ctk.CTkButton(row, text="Browse", width=90, command=lambda: self._browse(path)).pack(side="left")
 
@@ -414,8 +418,26 @@ class BepisApp(ctk.CTk):
         ctk.CTkLabel(row,text="Page load delay",width=160,anchor="w").pack(side="left")
         ctk.CTkEntry(row,textvariable=delay,width=120).pack(side="left")
 
+        default_save=ctk.StringVar(value=cfg.get("default_save_location",""))
+        row=ctk.CTkFrame(panel,fg_color="transparent")
+        row.pack(fill="x",padx=24,pady=12)
+        ctk.CTkLabel(row,text="Default save location",width=160,anchor="w").pack(side="left")
+        ctk.CTkEntry(row,textvariable=default_save).pack(side="left",fill="x",expand=True,padx=(0,8))
+        ctk.CTkButton(
+            row,
+            text="Browse",
+            width=90,
+            command=lambda:self._browse(default_save),
+        ).pack(side="left")
+
         ctk.CTkCheckBox(panel,text="Close browser after download",variable=close).pack(anchor="w",padx=184,pady=10)
-        ctk.CTkButton(panel,text="Save Settings",command=lambda:self._save_settings(browser.get(),delay.get(),close.get())).pack(anchor="w",padx=184,pady=(10,20))
+        ctk.CTkButton(
+            panel,
+            text="Save Settings",
+            command=lambda:self._save_settings(
+                browser.get(),delay.get(),close.get(),default_save.get()
+            ),
+        ).pack(anchor="w",padx=184,pady=(10,20))
 
     def show_about(self):
         self.clear_content()
@@ -551,7 +573,7 @@ class BepisApp(ctk.CTk):
             pass
         self.after(80,self._drain_log)
 
-    def _save_settings(self,browser,delay,close):
+    def _save_settings(self,browser,delay,close,default_save=""):
         try:
             value=int(delay)
             if value<5:
@@ -562,6 +584,7 @@ class BepisApp(ctk.CTk):
         save_config_value("browser",browser)
         save_config_value("website_load_interval",str(value))
         save_config_value("close_browser_after_download","1" if close else "0")
+        save_config_value("default_save_location",default_save.strip())
         self.status_right.configure(text=f"Browser: {browser.title()}   |   Page delay: {value}s   |   {APP_VERSION}")
         messagebox.showinfo("Settings","Settings saved.")
 

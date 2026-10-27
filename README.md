@@ -1,4 +1,4 @@
-# BepisDB Downloader r35
+# BepisDB Downloader r36
 
 Original project: **BepisDB-downloader by 0AwsD0**  
 https://github.com/0AwsD0/BepisDB-downloader
@@ -71,3 +71,14 @@ Chrome, Edge, or Firefox must already be installed. Firefox is the default.
 - Replaced the circular header placeholder with the BepisDB face/logo.
 - Reworked the top banner to follow the approved rendered UI: dark navy/indigo background with a cropped character-face composition on the right instead of the oversized single-eye graphic.
 - r34 Windows self-update support remains in place, so installed r34+ builds can update to r35 automatically once the r35 Windows release asset is published.
+
+
+## r36
+
+- Fixed Windows self-update failures caused by files still being locked after the main GUI closed.
+- The updater now waits on the exact Windows process handle before replacing files.
+- File replacements are staged beside the installed files and retried for up to 120 seconds when Windows, antivirus, or Explorer temporarily holds a file handle.
+- Onedir subfolders are merged safely instead of deleting the entire directory first.
+- `config.ini` remains preserved.
+- The GUI now fully terminates after handing control to `BepisDB-Updater.exe`, preventing lingering background threads from keeping the packaged EXE/DLLs locked.
+- Update errors now show a concise BepisDB message instead of a raw PyInstaller traceback.

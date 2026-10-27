@@ -52,6 +52,7 @@ DEFAULT_CONFIG = {
     "browser": "firefox",
     "website_load_interval": "5",
     "close_browser_after_download": "0",
+    "default_save_location": "",
 }
 
 CARD_DELAY_SECONDS = 3
@@ -510,8 +511,13 @@ def ask_save_location() -> Path | None:
     if base_raw:
         base = Path(os.path.expandvars(os.path.expanduser(base_raw))).resolve()
     else:
-        base = _default_download_directory().resolve()
-        print(f"Using default Downloads location: {base}")
+        configured = load_config().get("default_save_location", "").strip()
+        if configured:
+            base = Path(os.path.expandvars(os.path.expanduser(configured))).resolve()
+            print(f"Using configured default save location: {base}")
+        else:
+            base = _default_download_directory().resolve()
+            print(f"Using default Downloads location: {base}")
 
     print("\nFolder name:")
     folder_name = input("> ").strip().strip("\\/")

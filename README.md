@@ -1,4 +1,4 @@
-# BepisDB Downloader r34
+# BepisDB Downloader r35
 
 Original project: **BepisDB-downloader by 0AwsD0**  
 https://github.com/0AwsD0/BepisDB-downloader
@@ -61,3 +61,13 @@ Chrome, Edge, or Firefox must already be installed. Firefox is the default.
 - The helper relaunches `BepisDB-Downloader.exe` automatically when replacement finishes.
 - The Windows package now includes `BepisDB-Updater.exe`.
 - r34 must be installed manually once if upgrading from an older EXE build that does not yet contain the helper. Future updates can then install themselves.
+
+
+## r35
+
+- User Page downloads now recognize Koikatsu Clothing entries at `/kkclothing/view/<id>`.
+- Koikatsu Clothing items use the `KKCLOTHING` prefix for local completed-file checks.
+- Shared GUI listing detection also recognizes Koikatsu Clothing tiles.
+- Replaced the circular header placeholder with the BepisDB face/logo.
+- Reworked the top banner to follow the approved rendered UI: dark navy/indigo background with a cropped character-face composition on the right instead of the oversized single-eye graphic.
+- r34 Windows self-update support remains in place, so installed r34+ builds can update to r35 automatically once the r35 Windows release asset is published.

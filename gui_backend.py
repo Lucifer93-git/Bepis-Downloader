@@ -9,7 +9,7 @@ from pathlib import Path
 
 import download as core
 
-APP_VERSION = "2026.10.26-r34"
+APP_VERSION = "2026.10.27-r35"
 
 # In a PyInstaller onedir build, keep user-editable config.ini next to the EXE.
 if getattr(sys, "frozen", False):
@@ -59,14 +59,15 @@ def _listing_rows(browser):
         "a[href*='/koikatsu/view/']",
         "a[href*='/aishoujo/view/']",
         "a[href*='/kkscenes/view/']",
+        "a[href*='/kkclothing/view/']",
         "a[href*='/aiscenes/view/']",
     ])
-    prefixes = {"koikatsu":"KK", "kkscenes":"KKSCENE", "aishoujo":"AI", "aiscenes":"AISCENE"}
+    prefixes = {"koikatsu":"KK", "kkscenes":"KKSCENE", "kkclothing":"KKCLOTHING", "aishoujo":"AI", "aiscenes":"AISCENE"}
     rows, seen = [], set()
     for link in browser.driver.find_elements(core.By.CSS_SELECTOR, selector):
         try:
             href = link.get_attribute("href") or ""
-            match = re.search(r"/(koikatsu|aishoujo|kkscenes|aiscenes)/view/(\d+)", href, re.I)
+            match = re.search(r"/(koikatsu|aishoujo|kkscenes|kkclothing|aiscenes)/view/(\d+)", href, re.I)
             if not match:
                 continue
             route, number = match.group(1).casefold(), int(match.group(2))

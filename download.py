@@ -38,7 +38,7 @@ except ImportError:
     By = WebDriverWait = None
 
 
-APP_VERSION = "2026.10.26-r34"
+APP_VERSION = "2026.10.27-r35"
 PROJECT_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = PROJECT_DIR / "config.ini"
 BASE_URL = "https://db.bepis.moe"
@@ -265,6 +265,7 @@ ID_ROUTES = {
 DETAIL_PREFIXES = {
     "/koikatsu/view/": "KK",
     "/kkscenes/view/": "KKSCENE",
+    "/kkclothing/view/": "KKCLOTHING",
     "/aishoujo/view/": "AI",
     "/aiscenes/view/": "AISCENE",
 }
@@ -1556,11 +1557,11 @@ def _user_page_rows(browser):
     """Read each User Page card ID from its /view/<id> link without opening it."""
     rows, seen = [], set()
     for link in browser.driver.find_elements(
-        By.CSS_SELECTOR, "a[href*='/koikatsu/view/'],a[href*='/aishoujo/view/']"
+        By.CSS_SELECTOR, "a[href*='/koikatsu/view/'],a[href*='/aishoujo/view/'],a[href*='/kkclothing/view/']"
     ):
         try:
             href=link.get_attribute("href") or ""
-            m=re.search(r"/(koikatsu|aishoujo)/view/(\d+)",href,re.I)
+            m=re.search(r"/(koikatsu|aishoujo|kkclothing)/view/(\d+)",href,re.I)
             if not m: continue
             route,num=m.group(1).casefold(),int(m.group(2))
             if (route,num) in seen: continue
@@ -1571,7 +1572,8 @@ def _user_page_rows(browser):
               }
               return arguments[0].parentElement;
             """,link)
-            rows.append({"number":num,"prefix":"KK" if route=="koikatsu" else "AI",
+            prefixes = {"koikatsu": "KK", "aishoujo": "AI", "kkclothing": "KKCLOTHING"}
+            rows.append({"number":num,"prefix":prefixes[route],
                          "container":container})
             seen.add((route,num))
         except Exception: pass

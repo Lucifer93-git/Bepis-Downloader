@@ -9,7 +9,7 @@ from pathlib import Path
 
 import download as core
 
-APP_VERSION = "2026.10.27-r35"
+APP_VERSION = "2026.10.27-r36"
 
 # In a PyInstaller onedir build, keep user-editable config.ini next to the EXE.
 if getattr(sys, "frozen", False):

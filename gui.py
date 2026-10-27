@@ -171,12 +171,28 @@ class BepisApp(ctk.CTk):
         title_panel.grid_propagate(False)
         title_panel.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkLabel(
-            title_panel,
-            text="◉",
-            font=ctk.CTkFont(size=50),
-            text_color="#8eb5ff",
-        ).grid(row=0, column=0, rowspan=2, padx=(34, 18), pady=22)
+        # BepisDB face/logo at the left, matching the Windows app icon.
+        try:
+            logo = Image.open(_asset_path("assets/app-icon.png"))
+            self.header_logo_image = ctk.CTkImage(
+                light_image=logo,
+                dark_image=logo,
+                size=(64, 64),
+            )
+            ctk.CTkLabel(
+                title_panel,
+                text="",
+                image=self.header_logo_image,
+                fg_color="transparent",
+            ).grid(row=0, column=0, rowspan=2, padx=(28, 18), pady=22)
+        except Exception:
+            self.header_logo_image = None
+            ctk.CTkLabel(
+                title_panel,
+                text="B",
+                font=ctk.CTkFont(size=34, weight="bold"),
+                text_color="#d8875d",
+            ).grid(row=0, column=0, rowspan=2, padx=(34, 18), pady=22)
 
         ctk.CTkLabel(
             title_panel,

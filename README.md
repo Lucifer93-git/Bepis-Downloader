@@ -90,3 +90,11 @@ Chrome, Edge, or Firefox must already be installed. Firefox is the default.
 - The setting is stored in `config.ini` and automatically pre-fills every download form.
 - **Browse** still overrides the path for individual downloads.
 - If no default save location is configured, the GUI falls back to the normal Windows Downloads folder.
+
+
+### r36 usability improvements
+
+- Automatic updates now show real download progress in the main console and bottom status bar using the release ZIP's actual byte count.
+- Update stages are shown as **Checking release**, **Downloading update**, **Extracting update**, **Preparing installer**, and **Closing application**.
+- Right-click context menus are available on text-entry fields with **Cut**, **Copy**, **Paste**, and **Select All**.
+- The console/log area supports right-click **Copy** and **Select All**.

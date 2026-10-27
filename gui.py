@@ -766,7 +766,16 @@ class BepisApp(ctk.CTk):
                     close_fds=True,
                 )
 
-                self.after(0, self.destroy)
+                def close_for_update():
+                    try:
+                        self.destroy()
+                    finally:
+                        # The helper already has everything it needs. Exiting the
+                        # process prevents background threads from keeping the
+                        # PyInstaller image/DLLs locked during replacement.
+                        os._exit(0)
+
+                self.after(0, close_for_update)
                 return
 
             except Exception as exc:

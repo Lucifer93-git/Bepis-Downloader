@@ -55,57 +55,75 @@ img.save(
 # ---------------------------------------------------------------------------
 # Top banner
 # ---------------------------------------------------------------------------
+# The approved UI mockup uses a dark navy/indigo banner with a cropped
+# anime-style face on the right. Keep it as a full composition rather than the
+# oversized single-eye motif used by earlier builds.
 W, H = 1380, 126
 banner = Image.new("RGB", (W, H), "#071225")
 bd = ImageDraw.Draw(banner)
 
-# Navy -> indigo gradient.
+# Navy-to-indigo base.
 for x in range(W):
     t = x / max(1, W - 1)
-    r = int(7 + 13 * t)
-    g = int(18 + 16 * t)
-    b = int(40 + 46 * t)
+    r = int(7 + 18 * t)
+    g = int(18 + 20 * t)
+    b = int(40 + 72 * t)
     bd.line((x, 0, x, H), fill=(r, g, b))
 
-# Soft purple/blue glow fields.
+# Purple / electric-blue glow behind the character area.
 glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
 gd = ImageDraw.Draw(glow, "RGBA")
-gd.ellipse((720, -140, 1120, 260), fill=(94, 59, 255, 105))
-gd.ellipse((970, -120, 1390, 230), fill=(44, 112, 255, 95))
-gd.ellipse((560, -120, 850, 190), fill=(129, 61, 255, 60))
-glow = glow.filter(ImageFilter.GaussianBlur(52))
+gd.ellipse((720, -170, 1160, 270), fill=(103, 62, 255, 100))
+gd.ellipse((970, -150, 1450, 250), fill=(44, 119, 255, 95))
+gd.ellipse((590, -140, 900, 210), fill=(151, 73, 255, 45))
+glow = glow.filter(ImageFilter.GaussianBlur(54))
 banner = Image.alpha_composite(banner.convert("RGBA"), glow)
 
-# Stylized blue/purple eye motif on the right to match the approved mockup.
+# Cropped stylized anime face on the right, echoing the approved render.
 art = Image.new("RGBA", (W, H), (0, 0, 0, 0))
 ad = ImageDraw.Draw(art, "RGBA")
-for offset, alpha in ((0, 70), (18, 55), (36, 40)):
-    ad.arc((930-offset, -80-offset, 1450+offset, 250+offset),
-           190, 345, fill=(170, 195, 255, alpha), width=4)
-    ad.arc((850-offset, -110-offset, 1320+offset, 210+offset),
-           205, 350, fill=(120, 150, 255, alpha), width=3)
 
-ad.ellipse((1050, 28, 1275, 103),
-           fill=(18, 25, 54, 210),
-           outline=(160, 190, 255, 145), width=2)
-ad.ellipse((1132, 38, 1206, 112), fill=(102, 73, 235, 210))
-ad.ellipse((1152, 55, 1190, 96), fill=(16, 12, 43, 240))
-ad.ellipse((1160, 48, 1176, 64), fill=(225, 235, 255, 220))
-ad.arc((1048, 25, 1280, 112), 195, 345,
-       fill=(210, 222, 255, 180), width=3)
-ad.arc((1048, -5, 1280, 98), 15, 165,
-       fill=(150, 175, 255, 140), width=2)
+# Hair mass and layered strands.
+ad.ellipse((920, -170, 1430, 250), fill=(96, 126, 216, 90))
+ad.polygon(
+    [(980, 0), (1110, 0), (1040, 74), (1140, 20), (1095, 115),
+     (1215, 18), (1170, 125), (1325, 8), (1260, 125), (1410, 30),
+     (1380, 126), (940, 126)],
+    fill=(121, 158, 235, 115),
+)
+for x in (1000, 1055, 1115, 1190, 1265, 1340):
+    ad.line((x, 0, x-55, 126), fill=(190, 210, 255, 55), width=3)
 
-# Darken the left side so the title remains readable.
+# Soft skin region.
+ad.ellipse((1030, -45, 1425, 205), fill=(214, 181, 205, 78))
+
+# Two eyes, deliberately subtle so the banner reads as a face rather than an icon.
+for cx in (1140, 1305):
+    ad.ellipse((cx-63, 34, cx+63, 103),
+               fill=(23, 26, 58, 220),
+               outline=(174, 193, 255, 135), width=2)
+    ad.ellipse((cx-25, 43, cx+25, 95), fill=(110, 71, 235, 225))
+    ad.ellipse((cx-11, 51, cx+11, 91), fill=(18, 12, 43, 245))
+    ad.ellipse((cx-5, 47, cx+7, 59), fill=(235, 241, 255, 225))
+    ad.arc((cx-70, 25, cx+70, 105), 195, 345,
+           fill=(222, 229, 255, 180), width=3)
+
+# Nose / cheek hints and a few foreground hair strands.
+ad.line((1220, 67, 1208, 94), fill=(224, 193, 214, 70), width=2)
+ad.arc((1160, 81, 1280, 138), 10, 165, fill=(236, 184, 206, 55), width=2)
+ad.line((1090, 0, 1010, 126), fill=(210, 224, 255, 90), width=4)
+ad.line((1375, 0, 1290, 126), fill=(210, 224, 255, 80), width=4)
+
+# Dark left-side readability gradient for the title/logo area.
 shade = Image.new("RGBA", (W, H), (0, 0, 0, 0))
 sd = ImageDraw.Draw(shade, "RGBA")
-for x in range(800):
-    alpha = int(150 * (1 - x / 800))
+for x in range(850):
+    alpha = int(185 * (1 - x / 850))
     sd.line((x, 0, x, H), fill=(3, 9, 20, alpha))
 
 banner = Image.alpha_composite(Image.alpha_composite(banner, art), shade)
 banner_path = ASSETS / "banner.jpg"
-banner.convert("RGB").save(banner_path, "JPEG", quality=92)
+banner.convert("RGB").save(banner_path, "JPEG", quality=93)
 
 print(f"Generated {png_path}")
 print(f"Generated {ico_path}")

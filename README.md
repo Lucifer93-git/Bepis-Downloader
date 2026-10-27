@@ -82,3 +82,11 @@ Chrome, Edge, or Firefox must already be installed. Firefox is the default.
 - `config.ini` remains preserved.
 - The GUI now fully terminates after handing control to `BepisDB-Updater.exe`, preventing lingering background threads from keeping the packaged EXE/DLLs locked.
 - Update errors now show a concise BepisDB message instead of a raw PyInstaller traceback.
+
+
+### r36 additional setting
+
+- Added **Default save location** in Settings.
+- The setting is stored in `config.ini` and automatically pre-fills every download form.
+- **Browse** still overrides the path for individual downloads.
+- If no default save location is configured, the GUI falls back to the normal Windows Downloads folder.

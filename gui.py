@@ -12,7 +12,7 @@ import threading
 import webbrowser
 import zipfile
 from pathlib import Path
-from tkinter import PhotoImage, filedialog, messagebox
+from tkinter import Menu, PhotoImage, filedialog, messagebox
 
 import customtkinter as ctk
 import certifi
@@ -133,7 +133,83 @@ class BepisApp(ctk.CTk):
         self._build_content()
         self._build_statusbar()
         self.after(80, self._drain_log)
+        self.bind_all("<Button-3>", self._show_context_menu, add="+")
         self.show_home()
+
+    def _show_context_menu(self, event):
+        """Show a standard Windows-style edit menu on entries and text boxes."""
+        widget = event.widget
+        widget_class = str(widget.winfo_class()).casefold()
+
+        is_text = "text" in widget_class
+        is_entry = "entry" in widget_class or "spinbox" in widget_class
+        if not (is_text or is_entry):
+            return
+
+        menu = Menu(self, tearoff=0)
+
+        # The log console should stay copy-oriented; editable fields get the
+        # normal Cut/Copy/Paste actions.
+        console_widget = None
+        try:
+            if hasattr(self, "console") and self.console.winfo_exists():
+                console_widget = getattr(self.console, "_textbox", None)
+        except Exception:
+            pass
+
+        is_console = widget is console_widget
+
+        if not is_console:
+            menu.add_command(
+                label="Cut",
+                command=lambda w=widget: w.event_generate("<<Cut>>"),
+            )
+        menu.add_command(
+            label="Copy",
+            command=lambda w=widget: w.event_generate("<<Copy>>"),
+        )
+        if not is_console:
+            menu.add_command(
+                label="Paste",
+                command=lambda w=widget: w.event_generate("<<Paste>>"),
+            )
+
+        menu.add_separator()
+        menu.add_command(
+            label="Select All",
+            command=lambda w=widget, text=is_text: self._select_all_widget(w, text),
+        )
+
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    @staticmethod
+    def _select_all_widget(widget, is_text):
+        try:
+            if is_text:
+                widget.tag_add("sel", "1.0", "end-1c")
+                widget.mark_set("insert", "1.0")
+                widget.see("insert")
+            else:
+                widget.selection_range(0, "end")
+                widget.icursor("end")
+        except Exception:
+            pass
+
+    def _update_progress_ui(self, message, percent=None):
+        """Write updater progress to the console and bottom status bar."""
+        if percent is None:
+            status_text = f"● {message}"
+            log_text = f"{message}\n"
+        else:
+            percent = max(0, min(100, int(percent)))
+            status_text = f"● Updating... {percent}%"
+            log_text = f"Downloading update: {percent}%\n"
+
+        self.status.configure(text=status_text, text_color="#ffd27a")
+        self.log_queue.put(log_text)
 
     def _build_header(self):
         """Build the top banner; gracefully falls back to the plain header."""
@@ -727,7 +803,7 @@ class BepisApp(ctk.CTk):
             )
             return
 
-        self.status.configure(text="● Updating...", text_color="#ffd27a")
+        self._update_progress_ui("Checking release...")
 
         def job():
             temp_root = None
@@ -736,6 +812,8 @@ class BepisApp(ctk.CTk):
                 download_url = asset.get("browser_download_url")
                 if not download_url:
                     raise RuntimeError("The Windows release asset has no download URL.")
+
+                self.after(0, lambda: self._update_progress_ui("Downloading update...", 0))
 
                 temp_root = Path(tempfile.mkdtemp(prefix="bepis_self_update_"))
                 zip_path = temp_root / "update.zip"
@@ -750,13 +828,33 @@ class BepisApp(ctk.CTk):
                     verify=certifi.where(),
                 ) as response:
                     response.raise_for_status()
+                    total_bytes = int(response.headers.get("Content-Length") or 0)
+                    downloaded_bytes = 0
+                    last_percent = -1
+
                     with zip_path.open("wb") as handle:
                         for chunk in response.iter_content(chunk_size=1024 * 1024):
-                            if chunk:
-                                handle.write(chunk)
+                            if not chunk:
+                                continue
+                            handle.write(chunk)
+                            downloaded_bytes += len(chunk)
 
+                            if total_bytes > 0:
+                                percent = int(downloaded_bytes * 100 / total_bytes)
+                                if percent != last_percent:
+                                    last_percent = percent
+                                    self.after(
+                                        0,
+                                        lambda p=percent: self._update_progress_ui(
+                                            "Downloading update...", p
+                                        ),
+                                    )
+
+                self.after(0, lambda: self._update_progress_ui("Extracting update..."))
                 with zipfile.ZipFile(zip_path, "r") as archive:
                     archive.extractall(extract_dir)
+
+                self.after(0, lambda: self._update_progress_ui("Preparing installer..."))
 
                 new_exe = extract_dir / "BepisDB-Downloader.exe"
                 if not new_exe.exists():
@@ -773,6 +871,8 @@ class BepisApp(ctk.CTk):
                 # Run the helper from temp so it can replace the installed copy too.
                 helper_copy = temp_root / "BepisDB-Updater.exe"
                 shutil.copy2(installed_helper, helper_copy)
+
+                self.after(0, lambda: self._update_progress_ui("Closing application..."))
 
                 subprocess.Popen(
                     [

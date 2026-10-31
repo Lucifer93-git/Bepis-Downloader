@@ -53,6 +53,7 @@ DEFAULT_CONFIG = {
     "website_load_interval": "5",
     "close_browser_after_download": "0",
     "default_save_location": "",
+    "browser_mode": "visible",
 }
 
 CARD_DELAY_SECONDS = 3
@@ -787,20 +788,24 @@ def _discover_detail_links(html: str, page_url: str) -> list[str]:
 class BepisBrowser:
     """Launch and control only the browser instance created by this downloader."""
 
-    def __init__(self, browser_name: str, download_dir: Path):
+    def __init__(self, browser_name: str, download_dir: Path, headless: bool = False):
         if webdriver is None:
             raise RuntimeError("Selenium is not installed. Run: pip install -r requirements.txt")
         self.browser_name = str(browser_name or "chrome").casefold()
         self.download_dir = str(Path(download_dir).resolve())
-        self.driver = self._create_driver(self.browser_name, self.download_dir)
+        self.headless = bool(headless)
+        self.driver = self._create_driver(self.browser_name, self.download_dir, self.headless)
         self.driver.set_page_load_timeout(45)
 
     @staticmethod
-    def _create_driver(browser_name: str, download_dir: str):
+    def _create_driver(browser_name: str, download_dir: str, headless: bool = False):
         try:
             if browser_name == "chrome":
                 options = webdriver.ChromeOptions()
                 options.add_argument("--disable-notifications")
+                if headless:
+                    options.add_argument("--headless=new")
+                    options.add_argument("--window-size=1920,1080")
                 options.add_experimental_option("excludeSwitches", ["enable-logging"])
                 options.add_experimental_option("prefs", {
                     "download.default_directory": download_dir,
@@ -812,6 +817,9 @@ class BepisBrowser:
             if browser_name == "edge":
                 options = webdriver.EdgeOptions()
                 options.add_argument("--disable-notifications")
+                if headless:
+                    options.add_argument("--headless=new")
+                    options.add_argument("--window-size=1920,1080")
                 options.add_experimental_option("prefs", {
                     "download.default_directory": download_dir,
                     "download.prompt_for_download": False,
@@ -821,6 +829,10 @@ class BepisBrowser:
                 return webdriver.Edge(options=options)
             if browser_name == "firefox":
                 options = webdriver.FirefoxOptions()
+                if headless:
+                    options.add_argument("-headless")
+                    options.add_argument("--width=1920")
+                    options.add_argument("--height=1080")
                 options.set_preference("dom.webnotifications.enabled", False)
                 options.set_preference("browser.download.folderList", 2)
                 options.set_preference("browser.download.dir", download_dir)
@@ -1848,10 +1860,12 @@ def run_download(data: dict) -> dict:
     session = BatchSession(client, destination)
     page_delay = int(config["website_load_interval"])
     browser_name = config.get("browser", "firefox")
+    headless = str(config.get("browser_mode", "visible")).strip().casefold() == "headless"
 
     try:
-        print(f"Opening {BROWSER_LABELS.get(browser_name, browser_name)}...")
-        browser = BepisBrowser(browser_name, destination)
+        mode_label = " in background/headless mode" if headless else ""
+        print(f"Opening {BROWSER_LABELS.get(browser_name, browser_name)}{mode_label}...")
+        browser = BepisBrowser(browser_name, destination, headless=headless)
     except Exception as exc:
         print("\nBrowser could not be started.")
         print(f"Error: {exc}")
@@ -1905,7 +1919,7 @@ def run_download(data: dict) -> dict:
     except Exception as exc:
         print(f"\nUnexpected downloader error: {exc}")
     finally:
-        if str(config.get("close_browser_after_download", "0")).strip() == "1":
+        if headless or str(config.get("close_browser_after_download", "0")).strip() == "1":
             browser.close()
 
     session.cleanup()

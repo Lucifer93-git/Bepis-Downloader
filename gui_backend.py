@@ -258,11 +258,13 @@ def run_gui_download(data: dict, destination: Path) -> dict:
     session = core.BatchSession(client, destination)
     page_delay = int(config["website_load_interval"])
     browser_name = config.get("browser", "firefox")
+    headless = str(config.get("browser_mode", "visible")).strip().casefold() == "headless"
     core._print_summary(data, destination, config)
 
     try:
-        print(f"Opening {core.BROWSER_LABELS.get(browser_name, browser_name)}...")
-        browser = core.BepisBrowser(browser_name, destination)
+        mode_label = " in background/headless mode" if headless else ""
+        print(f"Opening {core.BROWSER_LABELS.get(browser_name, browser_name)}{mode_label}...")
+        browser = core.BepisBrowser(browser_name, destination, headless=headless)
     except Exception as exc:
         print(f"Browser could not be started.\nError: {exc}")
         return {"downloaded":0, "skipped":0, "failed_ids":[]}
@@ -281,7 +283,7 @@ def run_gui_download(data: dict, destination: Path) -> dict:
     except Exception as exc:
         print(f"\nUnexpected downloader error: {exc}")
     finally:
-        if str(config.get("close_browser_after_download", "0")).strip() == "1":
+        if headless or str(config.get("close_browser_after_download", "0")).strip() == "1":
             browser.close()
 
     session.cleanup(); session.verify(); result = session.result()

@@ -98,3 +98,15 @@ Chrome, Edge, or Firefox must already be installed. Firefox is the default.
 - Update stages are shown as **Checking release**, **Downloading update**, **Extracting update**, **Preparing installer**, and **Closing application**.
 - Right-click context menus are available on text-entry fields with **Cut**, **Copy**, **Paste**, and **Select All**.
 - The console/log area supports right-click **Copy** and **Select All**.
+
+
+## Headless test branch
+
+This branch is for testing background browser operation before merging it into the main release.
+
+- Settings now includes **Browser mode** with `visible` and `headless`.
+- `visible` keeps the current behavior.
+- `headless` runs Firefox, Chrome, or Edge without showing a browser window.
+- Headless browser sessions are always closed automatically when a download job finishes.
+- Existing pacing remains unchanged: 3 seconds between downloaded cards and the 5-second batch pause.
+- Test User Page, direct Card/Scene IDs, URL/Search, hidden cards, and Koikatsu Clothing before merging.

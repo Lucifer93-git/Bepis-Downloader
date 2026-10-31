@@ -319,7 +319,7 @@ class BepisApp(ctk.CTk):
         cfg = load_config()
         self.status_right = ctk.CTkLabel(
             bar,
-            text=f"Browser: {cfg.get('browser','firefox').title()}   |   Page delay: {cfg.get('website_load_interval','5')}s   |   {APP_VERSION}",
+            text=f"Browser: {cfg.get('browser','firefox').title()} ({'Headless' if cfg.get('browser_mode','visible') == 'headless' else 'Visible'})   |   Page delay: {cfg.get('website_load_interval','5')}s   |   {APP_VERSION}",
             text_color=MUTED,
         )
         self.status_right.grid(row=0, column=1, padx=24, pady=10, sticky="e")
@@ -483,11 +483,27 @@ class BepisApp(ctk.CTk):
         browser=ctk.StringVar(value=cfg.get("browser","firefox"))
         delay=ctk.StringVar(value=cfg.get("website_load_interval","5"))
         close=ctk.BooleanVar(value=cfg.get("close_browser_after_download","0")=="1")
+        browser_mode=ctk.StringVar(value=cfg.get("browser_mode","visible"))
 
         row=ctk.CTkFrame(panel,fg_color="transparent")
         row.pack(fill="x",padx=24,pady=12)
         ctk.CTkLabel(row,text="Browser",width=160,anchor="w").pack(side="left")
         ctk.CTkOptionMenu(row,values=["firefox","chrome","edge"],variable=browser).pack(side="left")
+
+        row=ctk.CTkFrame(panel,fg_color="transparent")
+        row.pack(fill="x",padx=24,pady=12)
+        ctk.CTkLabel(row,text="Browser mode",width=160,anchor="w").pack(side="left")
+        ctk.CTkOptionMenu(
+            row,
+            values=["visible","headless"],
+            variable=browser_mode,
+            width=180,
+        ).pack(side="left")
+        ctk.CTkLabel(
+            row,
+            text="Headless = browser runs in background",
+            text_color=MUTED,
+        ).pack(side="left",padx=12)
 
         row=ctk.CTkFrame(panel,fg_color="transparent")
         row.pack(fill="x",padx=24,pady=12)
@@ -511,7 +527,7 @@ class BepisApp(ctk.CTk):
             panel,
             text="Save Settings",
             command=lambda:self._save_settings(
-                browser.get(),delay.get(),close.get(),default_save.get()
+                browser.get(),delay.get(),close.get(),default_save.get(),browser_mode.get()
             ),
         ).pack(anchor="w",padx=184,pady=(10,20))
 
@@ -649,7 +665,7 @@ class BepisApp(ctk.CTk):
             pass
         self.after(80,self._drain_log)
 
-    def _save_settings(self,browser,delay,close,default_save=""):
+    def _save_settings(self,browser,delay,close,default_save="",browser_mode="visible"):
         try:
             value=int(delay)
             if value<5:
@@ -661,7 +677,10 @@ class BepisApp(ctk.CTk):
         save_config_value("website_load_interval",str(value))
         save_config_value("close_browser_after_download","1" if close else "0")
         save_config_value("default_save_location",default_save.strip())
-        self.status_right.configure(text=f"Browser: {browser.title()}   |   Page delay: {value}s   |   {APP_VERSION}")
+        browser_mode = "headless" if str(browser_mode).strip().casefold() == "headless" else "visible"
+        save_config_value("browser_mode",browser_mode)
+        mode_label = "Headless" if browser_mode == "headless" else "Visible"
+        self.status_right.configure(text=f"Browser: {browser.title()} ({mode_label})   |   Page delay: {value}s   |   {APP_VERSION}")
         messagebox.showinfo("Settings","Settings saved.")
 
     def _fetch_remote_version(self):

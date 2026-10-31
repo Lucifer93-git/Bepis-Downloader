@@ -2,7 +2,7 @@ name: Build Windows EXE
 
 on:
   push:
-    branches: [main, headless-test]
+    branches: [main, r37-browserless-test]
     tags:
       - 'r*'
   workflow_dispatch:

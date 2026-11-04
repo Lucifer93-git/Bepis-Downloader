@@ -39,8 +39,8 @@ jobs:
         shell: pwsh
         run: |
           $version = (Get-Content version.txt -Raw).Trim()
-          $releaseTag = ""
-          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+          $releaseTag = "r37-alpha"
+          if ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ inputs.release_tag }}" -ne "") {
             $releaseTag = "${{ inputs.release_tag }}"
           }
           "version=$version" >> $env:GITHUB_OUTPUT

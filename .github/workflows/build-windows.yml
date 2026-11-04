@@ -2,7 +2,7 @@ name: Build Windows EXE
 
 on:
   push:
-    branches: [main, r37-browserless-test]
+    branches: [main]
     tags:
       - 'r*'
   workflow_dispatch:
@@ -69,7 +69,7 @@ jobs:
       - name: Upload Windows build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: BepisDB-Downloader-Headless-Test-Windows
+          name: BepisDB-Downloader-Windows
           path: ${{ steps.version.outputs.zip_name }}
           if-no-files-found: error
 

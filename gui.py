@@ -124,6 +124,10 @@ class BepisApp(ctk.CTk):
         self.configure(fg_color=BG)
         self.log_queue = queue.Queue()
         self.worker = None
+        self.current_job_destination = None
+        self.job_status_label = None
+        self.job_progress_label = None
+        self.open_folder_button = None
 
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(1, weight=1)
@@ -364,6 +368,104 @@ class BepisApp(ctk.CTk):
         self.console.insert("end", f"BepisDB Downloader {APP_VERSION}\nOriginal project by 0AwsD0 | Updated by LuC!f3r\nReady.\n")
         return frame
 
+    def _make_job_status(self, parent):
+        """Reusable download status strip; later this can move into the queue page."""
+        frame = ctk.CTkFrame(
+            parent, fg_color=PANEL, border_width=1, border_color=BLUE, corner_radius=12
+        )
+        frame.pack(fill="x", padx=34, pady=(14, 0))
+
+        self.job_status_label = ctk.CTkLabel(
+            frame, text="● Ready", text_color="#86e6b5",
+            font=ctk.CTkFont(size=15, weight="bold"),
+        )
+        self.job_status_label.pack(side="left", padx=(22, 30), pady=14)
+
+        self.job_progress_label = ctk.CTkLabel(
+            frame,
+            text="Page: 0 / ?     Downloaded: 0     Skipped: 0",
+            text_color=TEXT,
+            font=ctk.CTkFont(size=15, weight="bold"),
+        )
+        self.job_progress_label.pack(side="left", padx=16, pady=14)
+
+        self.open_folder_button = ctk.CTkButton(
+            frame,
+            text="Open Download Folder",
+            width=180,
+            state="disabled",
+            command=self._open_job_folder,
+        )
+        self.open_folder_button.pack(side="right", padx=18, pady=10)
+        return frame
+
+    def _open_job_folder(self):
+        destination = self.current_job_destination
+        if not destination:
+            return
+        path = Path(destination)
+        if not path.exists():
+            return messagebox.showerror("Folder unavailable", f"Folder does not exist:\n{path}")
+        try:
+            if sys.platform.startswith("win"):
+                os.startfile(str(path))
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", str(path)])
+            else:
+                subprocess.Popen(["xdg-open", str(path)])
+        except Exception as exc:
+            messagebox.showerror("Open folder failed", str(exc))
+
+    def _set_job_destination(self, destination):
+        self.current_job_destination = str(destination) if destination else None
+        try:
+            if self.open_folder_button and self.open_folder_button.winfo_exists():
+                self.open_folder_button.configure(
+                    state="normal" if self.current_job_destination else "disabled"
+                )
+        except Exception:
+            pass
+
+    def _job_progress(self, state):
+        """Receive backend progress safely from the worker thread."""
+        def apply():
+            try:
+                if not self.job_progress_label or not self.job_progress_label.winfo_exists():
+                    return
+                phase = state.get("phase", "downloading")
+                downloaded = int(state.get("downloaded", 0) or 0)
+                skipped = int(state.get("skipped", 0) or 0)
+
+                if "total_items" in state:
+                    current = int(state.get("item", 0) or 0)
+                    total = int(state.get("total_items", 0) or 0)
+                    progress = f"Items: {current} / {total}     Downloaded: {downloaded}     Skipped: {skipped}"
+                else:
+                    page = int(state.get("page", 0) or 0)
+                    total_pages = state.get("total_pages", "?")
+                    progress = f"Page: {page} / {total_pages}     Downloaded: {downloaded}     Skipped: {skipped}"
+
+                self.job_progress_label.configure(text=progress)
+                if self.job_status_label and self.job_status_label.winfo_exists():
+                    labels = {
+                        "scanning": ("● Scanning...", "#ffd27a"),
+                        "ready": ("● Pre-scan complete", "#86e6b5"),
+                        "downloading": ("● Downloading...", "#8fb6ff"),
+                        "complete": ("● Complete", "#86e6b5"),
+                    }
+                    text, color = labels.get(phase, ("● Working...", "#ffd27a"))
+                    self.job_status_label.configure(text=text, text_color=color)
+
+                if phase == "complete":
+                    failed = int(state.get("failed", 0) or 0)
+                    if failed:
+                        self.job_status_label.configure(
+                            text=f"● Complete with {failed} failed", text_color="#ffb36b"
+                        )
+            except Exception:
+                pass
+        self.after(0, apply)
+
     def _destination_fields(self, parent):
         row = ctk.CTkFrame(parent, fg_color="transparent")
         row.pack(fill="x", padx=24, pady=8)
@@ -394,6 +496,7 @@ class BepisApp(ctk.CTk):
 
     def show_user_page(self):
         self.clear_content()
+        self.current_job_destination = None
         wrap = ctk.CTkScrollableFrame(self.content, fg_color=BG)
         wrap.pack(fill="both", expand=True)
         self._title(wrap, "User Page Download", "Directly downloads from the rendered user page without opening every card detail page.")
@@ -412,10 +515,32 @@ class BepisApp(ctk.CTk):
         pages = self._page_fields(panel)
         base, folder = self._destination_fields(panel)
 
+        types = {
+            "characters": ctk.BooleanVar(value=True),
+            "clothing": ctk.BooleanVar(value=True),
+            "scenes": ctk.BooleanVar(value=True),
+        }
+        type_row = ctk.CTkFrame(panel, fg_color="transparent")
+        type_row.pack(fill="x", padx=24, pady=(10, 4))
+        ctk.CTkLabel(type_row, text="Download types", text_color=TEXT, width=110, anchor="w").pack(side="left")
+        ctk.CTkCheckBox(type_row, text="Characters", variable=types["characters"]).pack(side="left", padx=(8,18))
+        ctk.CTkCheckBox(type_row, text="Clothing (KK)", variable=types["clothing"]).pack(side="left", padx=18)
+        ctk.CTkCheckBox(type_row, text="Scenes", variable=types["scenes"]).pack(side="left", padx=18)
+        ctk.CTkLabel(
+            panel,
+            text="Koikatsu: Characters, Clothing, Scenes   •   AI / HS2: Characters, Scenes",
+            text_color=MUTED,
+        ).pack(anchor="w", padx=142, pady=(0, 8))
+
         ctk.CTkButton(
             panel, text="Start Download", height=46, fg_color=GREEN,
-            command=lambda: self._start_user(url.get(), hidden.get(), pages.get(), base.get(), folder.get())
+            command=lambda: self._start_user(
+                url.get(), hidden.get(), pages.get(), base.get(), folder.get(),
+                {name for name, var in types.items() if var.get()},
+            )
         ).pack(anchor="w", padx=142, pady=(14,22))
+
+        self._make_job_status(wrap)
         self._make_console(wrap)
 
     def show_game(self, game):
@@ -433,6 +558,7 @@ class BepisApp(ctk.CTk):
         self._fill_direct_tab(tabs.tab("Card IDs"), game, "card")
         self._fill_direct_tab(tabs.tab("Scene IDs"), game, "scene")
         self._fill_search_tab(tabs.tab("URL / Search"), game)
+        self._make_job_status(wrap)
         self._make_console(wrap)
 
     def _fill_direct_tab(self, tab, game, kind):
@@ -568,15 +694,24 @@ class BepisApp(ctk.CTk):
             raise ValueError("Could not create or use the save location.")
         return dest
 
-    def _start_user(self,url,hidden,pages,base,folder):
+    def _start_user(self,url,hidden,pages,base,folder,selected_types):
         ok,msg,norm=validate_user_url(url.strip())
         if not ok:
             return messagebox.showerror("Invalid User Page",msg)
+        if not selected_types:
+            return messagebox.showerror("Select download types", "Select at least one card type to download.")
         try:
             start,end=self._parse_pages(pages)
         except ValueError as exc:
             return messagebox.showerror("Invalid pages",str(exc))
-        self._run_async({"mode":"user","url":norm,"show_hidden":hidden,"start_from":start,"end_at":end},base,folder)
+        self._run_async({
+            "mode":"user",
+            "url":norm,
+            "show_hidden":hidden,
+            "start_from":start,
+            "end_at":end,
+            "selected_types":sorted(selected_types),
+        },base,folder)
 
     def _start_ids(self,game,kind,raw,base,folder):
         try:
@@ -634,13 +769,24 @@ class BepisApp(ctk.CTk):
             return messagebox.showinfo("Download running","A download is already running.")
 
         self.status.configure(text="● Working...",text_color="#ffd27a")
+        try:
+            if self.job_status_label and self.job_status_label.winfo_exists():
+                self.job_status_label.configure(text="● Preparing...", text_color="#ffd27a")
+            if self.job_progress_label and self.job_progress_label.winfo_exists():
+                if data.get("mode") == "ids":
+                    self.job_progress_label.configure(text="Items: 0 / ?     Downloaded: 0     Skipped: 0")
+                else:
+                    self.job_progress_label.configure(text="Page: 0 / ?     Downloaded: 0     Skipped: 0")
+        except Exception:
+            pass
 
         def job():
             writer=QueueWriter(self.log_queue)
             try:
                 with contextlib.redirect_stdout(writer), contextlib.redirect_stderr(writer):
                     dest=self._prepare(base,folder)
-                    result=run_gui_download(data,dest)
+                    self.after(0, lambda d=dest: self._set_job_destination(d))
+                    result=run_gui_download(data,dest,progress_callback=self._job_progress)
                     print("\nFinished.")
                     print(f"Downloaded: {result.get('downloaded',0)}")
                     print(f"Skipped existing: {result.get('skipped',0)}")
@@ -648,6 +794,7 @@ class BepisApp(ctk.CTk):
                         print("Failed: "+", ".join(result['failed_ids']))
             except Exception as exc:
                 self.log_queue.put(f"\nError: {exc}\n")
+                self._job_progress({"phase":"complete","downloaded":0,"skipped":0,"failed":1})
             finally:
                 self.after(0,lambda:self.status.configure(text="● Ready",text_color="#8fb6ff"))
 

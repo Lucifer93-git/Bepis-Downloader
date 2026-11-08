@@ -18,6 +18,8 @@ import configparser
 import http.cookiejar
 import os
 import re
+import shutil
+import sys
 import time
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
@@ -40,7 +42,27 @@ except ImportError:
 
 APP_VERSION = "2026.11.04-r37-alpha"
 PROJECT_DIR = Path(__file__).resolve().parent
-CONFIG_PATH = PROJECT_DIR / "config.ini"
+LEGACY_CONFIG_PATH = (
+    Path(sys.executable).resolve().parent / "config.ini"
+    if getattr(sys, "frozen", False)
+    else PROJECT_DIR / "config.ini"
+)
+
+
+def _persistent_config_path() -> Path:
+    """Return a settings path that survives replacing/deleting the app folder."""
+    if sys.platform.startswith("win"):
+        root = (
+            os.environ.get("APPDATA")
+            or os.environ.get("LOCALAPPDATA")
+            or str(Path.home() / "AppData" / "Roaming")
+        )
+        return Path(root) / "BepisDB Downloader" / "config.ini"
+    # Keep source/non-Windows behavior predictable while still using a user-owned path.
+    return Path.home() / ".config" / "BepisDB Downloader" / "config.ini"
+
+
+CONFIG_PATH = _persistent_config_path()
 BASE_URL = "https://db.bepis.moe"
 
 # ---------------------------------------------------------------------------
@@ -69,7 +91,18 @@ BROWSER_LABELS = {
 
 
 def ensure_config() -> None:
-    """Create config.ini when missing and make sure all r11 keys exist."""
+    """Create persistent settings and migrate the legacy app-folder config once."""
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    # First run after upgrading: preserve settings from the old config beside
+    # the EXE/source tree, then use AppData (Windows) from that point onward.
+    if not CONFIG_PATH.exists() and LEGACY_CONFIG_PATH.exists():
+        try:
+            if LEGACY_CONFIG_PATH.resolve() != CONFIG_PATH.resolve():
+                shutil.copy2(LEGACY_CONFIG_PATH, CONFIG_PATH)
+        except OSError:
+            pass
+
     parser = configparser.ConfigParser()
     if CONFIG_PATH.exists():
         parser.read(CONFIG_PATH, encoding="utf-8")

@@ -1,4 +1,4 @@
-# BepisDB Downloader r37-alpha
+# BepisDB Downloader r37-beta
 
 Original project: **BepisDB-downloader by 0AwsD0**  
 https://github.com/0AwsD0/BepisDB-downloader
@@ -100,9 +100,9 @@ Chrome, Edge, or Firefox must already be installed. Firefox is the default.
 - The console/log area supports right-click **Copy** and **Select All**.
 
 
-## r37-alpha browserless test
+## r37-beta browserless test
 
-This branch is for testing background browser operation before merging it into the main release.
+This branch is the r37 beta test build for background browser operation and the new pre-scan/status/persistent-settings features. It remains separate from the stable main branch.
 
 - Settings now includes **Browser mode** with `visible` and `headless`.
 - `visible` keeps the current behavior.

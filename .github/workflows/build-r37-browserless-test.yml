@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Optional existing release tag to attach the Windows ZIP to (example: r37-alpha)'
+        description: 'Optional existing release tag to attach the Windows ZIP to (example: r37-beta)'
         required: false
         type: string
 
@@ -39,7 +39,7 @@ jobs:
         shell: pwsh
         run: |
           $version = (Get-Content version.txt -Raw).Trim()
-          $releaseTag = "r37-alpha"
+          $releaseTag = "r37-beta"
           if ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ inputs.release_tag }}" -ne "") {
             $releaseTag = "${{ inputs.release_tag }}"
           }

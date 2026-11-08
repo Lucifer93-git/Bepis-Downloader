@@ -110,3 +110,9 @@ This branch is for testing background browser operation before merging it into t
 - Headless browser sessions are always closed automatically when a download job finishes.
 - Existing pacing remains unchanged: 3 seconds between downloaded cards and the 5-second batch pause.
 - Test User Page, direct Card/Scene IDs, URL/Search, hidden cards, and Koikatsu Clothing before merging.
+
+### Persistent settings test
+
+- Windows settings are now stored in `%APPDATA%\BepisDB Downloader\config.ini` so they survive deleting or replacing the extracted app folder.
+- On the first run after upgrading, an existing legacy `config.ini` beside the EXE is copied into AppData automatically when no persistent config exists yet.
+- After migration, AppData becomes the active settings store for browser choice, browser mode, page delay, close-browser preference, and default save location.

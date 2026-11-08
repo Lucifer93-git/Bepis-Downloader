@@ -11,11 +11,7 @@ import download as core
 
 APP_VERSION = "2026.11.04-r37-alpha"
 
-# In a PyInstaller onedir build, keep user-editable config.ini next to the EXE.
-if getattr(sys, "frozen", False):
-    core.PROJECT_DIR = Path(sys.executable).resolve().parent
-    core.CONFIG_PATH = core.PROJECT_DIR / "config.ini"
-
+# User settings are stored persistently by download.py (AppData on Windows).
 
 def prepare_destination(base_path: str | Path, folder_name: str = "") -> Path | None:
     base = Path(os.path.expandvars(os.path.expanduser(str(base_path or "")))).resolve()

@@ -1,4 +1,10 @@
-# BepisDB Downloader r36
+# BepisDB Downloader
+
+**Current stable release: r36**
+
+r36 is the stable Windows release with the current GUI, self-updater, default save location, improved update progress, and right-click copy/paste support.
+
+**r37 browserless/headless mode is currently in alpha testing** on the separate `r37-browserless-test` branch. It is not merged into the stable release yet.
 
 Original project: **BepisDB-downloader by 0AwsD0**  
 https://github.com/0AwsD0/BepisDB-downloader

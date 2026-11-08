@@ -199,60 +199,187 @@ def _total_pages(browser, current_page):
     return total
 
 
-def _run_listing(browser, session, data, page_delay, base_url, user_mode=False):
-    page = max(1, int(data.get("start_from", 1)))
+def _recursive_existing_pngs(destination: Path) -> dict[str, Path]:
+    """Index PNG filenames recursively so existing cards in subfolders are skipped."""
+    found = {}
+    try:
+        for path in destination.rglob("*.png"):
+            if path.is_file():
+                found.setdefault(path.name.casefold(), path)
+    except OSError:
+        pass
+    return found
+
+
+def _row_category(prefix: str) -> str:
+    prefix = str(prefix or "").upper()
+    if prefix == "KKCLOTHING":
+        return "clothing"
+    if prefix in {"KKSCENE", "AISCENE"}:
+        return "scenes"
+    return "characters"
+
+
+def _selected_row(row: dict, selected_types: set[str]) -> bool:
+    return _row_category(row.get("prefix", "")) in selected_types
+
+
+def _emit_progress(callback, **state):
+    if callback:
+        try:
+            callback(state)
+        except Exception:
+            pass
+
+
+def _scan_listing(browser, data, page_delay, base_url, user_mode=False, progress_callback=None):
+    """Pre-scan selected pages and return stable item metadata before downloading."""
+    start_page = max(1, int(data.get("start_from", 1)))
     requested_end = data.get("end_at")
     requested_end = int(requested_end) if requested_end is not None else None
-    previous, detected_total = None, None
+    selected_types = set(data.get("selected_types") or ("characters", "clothing", "scenes"))
 
+    page = start_page
+    previous = None
+    detected_total = None
+    scanned = []
+
+    print("\nPre-scanning selected pages...")
     while True:
         if user_mode:
             page_url = core.apply_user_page_controls(base_url, bool(data.get("show_hidden")), page)
         else:
             page_url = core.apply_run_controls(base_url, bool(data.get("show_hidden")), page)
             page_url = core.set_query_value(page_url, "page", page if page > 1 else None)
+
         browser.open_rendered(page_url, page_delay)
         rows = _listing_rows(browser)
         signature = tuple((r["prefix"], r["number"]) for r in rows)
         if not rows or signature == previous:
             break
         previous = signature
+
         page_total = _total_pages(browser, page)
         detected_total = page_total if detected_total is None else max(detected_total, page_total)
         effective_end = detected_total if requested_end is None else min(detected_total, requested_end)
-        print(f"\nPage {page} of {detected_total}")
-        print("----------------------------------------")
 
-        for index, row in enumerate(rows):
-            expected = core._expected_filename(row["prefix"], row["number"])
-            existing = core._existing_expected_png(session.destination, expected)
-            session.processed += 1
-            if existing:
-                session.skipped += 1
-                status = "skipped"
-                print(f'{row["number"]}: Already exists - skipped')
-            else:
-                status, message, payload, elapsed = _download_tile(browser, row["container"])
-                if status == "downloaded":
-                    session.downloaded += 1
-                    session.completed_files.append(payload)
-                    print(f'{row["number"]}: Downloaded ({elapsed:.1f}s)')
-                else:
-                    session.failed_ids.append(str(row["number"]))
-                    if isinstance(payload, list):
-                        session.cleanup_paths.extend(payload)
-                    print(f'{row["number"]}: Download failed')
-                    print(f"Reason: {message}")
-            has_more = index < len(rows)-1 or page < effective_end
-            session.wait_after_item(has_more, status)
+        selected = [
+            {"prefix": row["prefix"], "number": row["number"], "page": page}
+            for row in rows if _selected_row(row, selected_types)
+        ]
+        scanned.extend(selected)
+        _emit_progress(
+            progress_callback,
+            phase="scanning",
+            page=page,
+            total_pages=effective_end,
+            downloaded=0,
+            skipped=0,
+            items_total=len(scanned),
+        )
+        print(f"Scanned page {page} of {effective_end}: {len(selected)} selected item(s)")
 
         if page >= effective_end:
             break
         page += 1
 
+    total_pages = detected_total or start_page
+    if requested_end is not None:
+        total_pages = min(total_pages, requested_end)
+    return scanned, start_page, total_pages
 
-def run_gui_download(data: dict, destination: Path) -> dict:
-    """GUI entry point: direct IDs use core; all listing modes use direct tiles."""
+
+def _run_listing(browser, session, data, page_delay, base_url, user_mode=False, progress_callback=None):
+    scanned, start_page, total_pages = _scan_listing(
+        browser, data, page_delay, base_url, user_mode=user_mode,
+        progress_callback=progress_callback,
+    )
+
+    existing_index = _recursive_existing_pngs(session.destination)
+    missing_by_page = {}
+    skipped = 0
+    for item in scanned:
+        expected = core._expected_filename(item["prefix"], item["number"])
+        if expected.casefold() in existing_index:
+            skipped += 1
+        else:
+            missing_by_page.setdefault(item["page"], set()).add((item["prefix"], item["number"]))
+
+    session.processed += skipped
+    session.skipped += skipped
+    print(f"Pre-scan complete: {len(scanned)} selected item(s), {skipped} already exist, {len(scanned)-skipped} to download.")
+    _emit_progress(
+        progress_callback,
+        phase="ready",
+        page=0,
+        total_pages=total_pages,
+        downloaded=session.downloaded,
+        skipped=session.skipped,
+        items_total=len(scanned),
+    )
+
+    if not missing_by_page:
+        return
+
+    selected_types = set(data.get("selected_types") or ("characters", "clothing", "scenes"))
+    for page in range(start_page, total_pages + 1):
+        wanted = missing_by_page.get(page)
+        if not wanted:
+            _emit_progress(
+                progress_callback,
+                phase="downloading",
+                page=page,
+                total_pages=total_pages,
+                downloaded=session.downloaded,
+                skipped=session.skipped,
+                items_total=len(scanned),
+            )
+            continue
+
+        if user_mode:
+            page_url = core.apply_user_page_controls(base_url, bool(data.get("show_hidden")), page)
+        else:
+            page_url = core.apply_run_controls(base_url, bool(data.get("show_hidden")), page)
+            page_url = core.set_query_value(page_url, "page", page if page > 1 else None)
+
+        browser.open_rendered(page_url, page_delay)
+        rows = [
+            row for row in _listing_rows(browser)
+            if _selected_row(row, selected_types)
+            and (row["prefix"], row["number"]) in wanted
+        ]
+        print(f"\nPage {page} of {total_pages}")
+        print("----------------------------------------")
+
+        for index, row in enumerate(rows):
+            session.processed += 1
+            status, message, payload, elapsed = _download_tile(browser, row["container"])
+            if status == "downloaded":
+                session.downloaded += 1
+                session.completed_files.append(payload)
+                print(f'{row["number"]}: Downloaded ({elapsed:.1f}s)')
+            else:
+                session.failed_ids.append(str(row["number"]))
+                if isinstance(payload, list):
+                    session.cleanup_paths.extend(payload)
+                print(f'{row["number"]}: Download failed')
+                print(f"Reason: {message}")
+
+            _emit_progress(
+                progress_callback,
+                phase="downloading",
+                page=page,
+                total_pages=total_pages,
+                downloaded=session.downloaded,
+                skipped=session.skipped,
+                items_total=len(scanned),
+            )
+            has_more = index < len(rows)-1 or any(p > page for p in missing_by_page)
+            session.wait_after_item(has_more, status)
+
+
+def run_gui_download(data: dict, destination: Path, progress_callback=None) -> dict:
+    """GUI entry point with pre-scan, recursive skips, and progress callbacks."""
     config = core.load_config()
     client = core.BepisHTTPClient()
     session = core.BatchSession(client, destination)
@@ -272,21 +399,64 @@ def run_gui_download(data: dict, destination: Path) -> dict:
     try:
         if data.get("mode") == "ids":
             items = data.get("id_items", [])
-            for index, item in enumerate(items, 1):
+            existing_index = _recursive_existing_pngs(destination)
+            missing = []
+            for item in items:
+                expected = core._expected_filename(item["prefix"], item["number"])
+                if expected.casefold() in existing_index:
+                    session.processed += 1
+                    session.skipped += 1
+                else:
+                    missing.append(item)
+
+            _emit_progress(
+                progress_callback,
+                phase="ready",
+                item=0,
+                total_items=len(items),
+                downloaded=0,
+                skipped=session.skipped,
+            )
+            for index, item in enumerate(missing, 1):
                 status = session.process_direct_id(browser, item, page_delay)
-                session.wait_after_item(index < len(items), status)
+                _emit_progress(
+                    progress_callback,
+                    phase="downloading",
+                    item=session.downloaded + session.skipped + len(session.failed_ids),
+                    total_items=len(items),
+                    downloaded=session.downloaded,
+                    skipped=session.skipped,
+                )
+                session.wait_after_item(index < len(missing), status)
+
         elif data.get("mode") == "user":
-            _run_listing(browser, session, data, page_delay, data["url"], user_mode=True)
+            _run_listing(
+                browser, session, data, page_delay, data["url"],
+                user_mode=True, progress_callback=progress_callback,
+            )
         else:
             base_url = data.get("url") or core.build_manual_search_url(data["game"], data)
-            _run_listing(browser, session, data, page_delay, base_url, user_mode=False)
+            _run_listing(
+                browser, session, data, page_delay, base_url,
+                user_mode=False, progress_callback=progress_callback,
+            )
     except Exception as exc:
         print(f"\nUnexpected downloader error: {exc}")
     finally:
         if headless or str(config.get("close_browser_after_download", "0")).strip() == "1":
             browser.close()
 
-    session.cleanup(); session.verify(); result = session.result()
+    session.cleanup()
+    session.verify()
+    result = session.result()
+    _emit_progress(
+        progress_callback,
+        phase="complete",
+        downloaded=result["downloaded"],
+        skipped=result["skipped"],
+        failed=len(result["failed_ids"]),
+    )
+
     print("\n" + "-"*40)
     print("Download failed.\n" if result["failed_ids"] else "Download complete.\n")
     print(f"Downloaded: {result['downloaded']}")

@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Optional release tag to attach the Windows ZIP to (example: r38-beta)'
+        description: 'Optional release tag to attach the Windows ZIP to (examples: r38-alpha, r38-beta, r38-gamma, r38-rc1)'
         required: false
         type: string
 
@@ -47,7 +47,184 @@ jobs:
           $releaseTag = ""
           $versionTag = ""
 
-          if ($version -match '-(r\d+(?:-[A-Za-z0-9._-]+)?)$') {
+          # Supported version tags:
+          #   Stable:     r38
+          #   Prerelease: r38-alpha, r38-beta, r38-gamma, r38-rc1, r38-anything
+          # The prerelease label is intentionally generic so future test stages
+          # do not require workflow changes.
+          if ($version -match '-(r\d+(?:-[A-Za-z0-9._-]+)?)
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $releaseTag = "${{ github.ref_name }}"
+          }
+          elseif ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ inputs.release_tag }}" -ne "") {
+            $releaseTag = "${{ inputs.release_tag }}"
+          }
+          elseif ("${{ github.ref_name }}" -eq "main" -and $versionTag -ne "") {
+            $releaseTag = $versionTag
+          }
+          elseif ("${{ github.ref_type }}" -eq "branch" -and "${{ github.ref_name }}" -ne "main" -and $versionTag -match '^r\d+-.+$') {
+            $releaseTag = $versionTag
+          }
+
+          $refLabel = "${{ github.ref_name }}" -replace '[^A-Za-z0-9._-]', '-'
+          if ([string]::IsNullOrWhiteSpace($refLabel)) {
+            $refLabel = "build"
+          }
+
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "version_tag=$versionTag" >> $env:GITHUB_OUTPUT
+          "release_tag=$releaseTag" >> $env:GITHUB_OUTPUT
+          "zip_name=BepisDB-Downloader-$version-Windows.zip" >> $env:GITHUB_OUTPUT
+          "artifact_name=BepisDB-Downloader-$refLabel-$version-Windows" >> $env:GITHUB_OUTPUT
+
+      - name: Generate branding assets
+        run: |
+          python tools/generate_brand_assets.py
+
+      - name: Build GUI executable
+        run: |
+          pyinstaller --noconfirm --clean --windowed --onedir --name BepisDB-Downloader --collect-all customtkinter --collect-all selenium --hidden-import selenium.webdriver.firefox.options --hidden-import selenium.webdriver.firefox.service --hidden-import selenium.webdriver.chrome.options --hidden-import selenium.webdriver.chrome.service --hidden-import selenium.webdriver.edge.options --hidden-import selenium.webdriver.edge.service --icon "assets/app.ico" --add-data "assets/app-icon.png;assets" --add-data "assets/app.ico;assets" --add-data "assets/banner.jpg;assets" gui.py
+          pyinstaller --noconfirm --clean --windowed --onefile --name BepisDB-Updater --distpath dist\helper self_updater.py
+          copy dist\helper\BepisDB-Updater.exe dist\BepisDB-Downloader\BepisDB-Updater.exe
+          copy config.ini dist\BepisDB-Downloader\config.ini
+          copy version.txt dist\BepisDB-Downloader\version.txt
+          copy README.md dist\BepisDB-Downloader\README.md
+
+      - name: Create ZIP
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist\BepisDB-Downloader\* -DestinationPath "${{ steps.version.outputs.zip_name }}" -Force
+
+      - name: Upload Windows build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.version.outputs.artifact_name }}
+          path: ${{ steps.version.outputs.zip_name }}
+          if-no-files-found: error
+
+      - name: Publish ZIP to GitHub Release
+        if: steps.version.outputs.release_tag != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ steps.version.outputs.release_tag }}"
+          $zip = "${{ steps.version.outputs.zip_name }}"
+
+          $isPrerelease = $tag -match '^r\d+-.+            Write-Host "Release $tag does not exist. Creating it from commit ${{ github.sha }}."
+
+            if ($isPrerelease) {
+              gh release create "$tag" "$zip" --title "Bepis Downloader $tag" --target "${{ github.sha }}" --generate-notes --prerelease
+            }
+            else {
+              gh release create "$tag" "$zip" --title "Bepis Downloader $tag" --target "${{ github.sha }}" --generate-notes
+            }
+          }
+          else {
+            Write-Host "Release $tag exists. Uploading/replacing $zip."
+            gh release upload "$tag" "$zip" --clobber
+
+            # Keep release state consistent with the tag even if the release was
+            # created manually beforehand.
+            if ($isPrerelease) {
+              gh release edit "$tag" --prerelease
+            }
+          }
+) {
+            $versionTag = $Matches[1]
+          }
+
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $releaseTag = "${{ github.ref_name }}"
+          }
+          elseif ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ inputs.release_tag }}" -ne "") {
+            $releaseTag = "${{ inputs.release_tag }}"
+          }
+          elseif ("${{ github.ref_name }}" -eq "main" -and $versionTag -ne "") {
+            $releaseTag = $versionTag
+          }
+          elseif ("${{ github.ref_type }}" -eq "branch" -and "${{ github.ref_name }}" -ne "main" -and $versionTag -match '^r\d+-.+$') {
+            $releaseTag = $versionTag
+          }
+
+          $refLabel = "${{ github.ref_name }}" -replace '[^A-Za-z0-9._-]', '-'
+          if ([string]::IsNullOrWhiteSpace($refLabel)) {
+            $refLabel = "build"
+          }
+
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "version_tag=$versionTag" >> $env:GITHUB_OUTPUT
+          "release_tag=$releaseTag" >> $env:GITHUB_OUTPUT
+          "zip_name=BepisDB-Downloader-$version-Windows.zip" >> $env:GITHUB_OUTPUT
+          "artifact_name=BepisDB-Downloader-$refLabel-$version-Windows" >> $env:GITHUB_OUTPUT
+
+      - name: Generate branding assets
+        run: |
+          python tools/generate_brand_assets.py
+
+      - name: Build GUI executable
+        run: |
+          pyinstaller --noconfirm --clean --windowed --onedir --name BepisDB-Downloader --collect-all customtkinter --collect-all selenium --hidden-import selenium.webdriver.firefox.options --hidden-import selenium.webdriver.firefox.service --hidden-import selenium.webdriver.chrome.options --hidden-import selenium.webdriver.chrome.service --hidden-import selenium.webdriver.edge.options --hidden-import selenium.webdriver.edge.service --icon "assets/app.ico" --add-data "assets/app-icon.png;assets" --add-data "assets/app.ico;assets" --add-data "assets/banner.jpg;assets" gui.py
+          pyinstaller --noconfirm --clean --windowed --onefile --name BepisDB-Updater --distpath dist\helper self_updater.py
+          copy dist\helper\BepisDB-Updater.exe dist\BepisDB-Downloader\BepisDB-Updater.exe
+          copy config.ini dist\BepisDB-Downloader\config.ini
+          copy version.txt dist\BepisDB-Downloader\version.txt
+          copy README.md dist\BepisDB-Downloader\README.md
+
+      - name: Create ZIP
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist\BepisDB-Downloader\* -DestinationPath "${{ steps.version.outputs.zip_name }}" -Force
+
+      - name: Upload Windows build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.version.outputs.artifact_name }}
+          path: ${{ steps.version.outputs.zip_name }}
+          if-no-files-found: error
+
+      - name: Publish ZIP to GitHub Release
+        if: steps.version.outputs.release_tag != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ steps.version.outputs.release_tag }}"
+          $zip = "${{ steps.version.outputs.zip_name }}"
+
+          gh release view "$tag" | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Release $tag does not exist. Creating it from commit ${{ github.sha }}."
+
+            if ($tag -match '^r\d+-.+$') {
+              gh release create "$tag" "$zip" --title "Bepis Downloader $tag" --target "${{ github.sha }}" --generate-notes --prerelease
+            }
+            else {
+              gh release create "$tag" "$zip" --title "Bepis Downloader $tag" --target "${{ github.sha }}" --generate-notes
+            }
+          }
+          else {
+            Write-Host "Release $tag exists. Uploading/replacing $zip."
+            gh release upload "$tag" "$zip" --clobber
+          }
+
+
+          gh release view "$tag" | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Release $tag does not exist. Creating it from commit ${{ github.sha }}."
+
+            if ($tag -match '^r\d+-.+$') {
+              gh release create "$tag" "$zip" --title "Bepis Downloader $tag" --target "${{ github.sha }}" --generate-notes --prerelease
+            }
+            else {
+              gh release create "$tag" "$zip" --title "Bepis Downloader $tag" --target "${{ github.sha }}" --generate-notes
+            }
+          }
+          else {
+            Write-Host "Release $tag exists. Uploading/replacing $zip."
+            gh release upload "$tag" "$zip" --clobber
+          }
+) {
             $versionTag = $Matches[1]
           }
 

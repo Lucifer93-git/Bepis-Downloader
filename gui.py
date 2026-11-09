@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import webbrowser
 import zipfile
 from pathlib import Path
@@ -952,6 +953,137 @@ class BepisApp(ctk.CTk):
             buttons, text="Open release", fg_color=BLUE, command=open_release
         ).pack(side="right")
 
+    def _download_update_asset(self, asset, zip_path):
+        """Download a release ZIP with retries and Windows curl fallback."""
+        direct_url = str(asset.get("browser_download_url") or "").strip()
+        api_url = str(asset.get("url") or "").strip()
+        if not direct_url:
+            raise RuntimeError("The Windows release asset has no download URL.")
+
+        base_headers = {"User-Agent": "BepisDB-Downloader"}
+        errors = []
+
+        def download_with_requests(url, extra_headers=None, label="GitHub"):
+            headers = dict(base_headers)
+            if extra_headers:
+                headers.update(extra_headers)
+
+            for attempt in range(1, 5):
+                try:
+                    try:
+                        if zip_path.exists():
+                            zip_path.unlink()
+                    except OSError:
+                        pass
+
+                    with requests.get(
+                        url,
+                        headers=headers,
+                        stream=True,
+                        allow_redirects=True,
+                        timeout=(20, 180),
+                        verify=certifi.where(),
+                    ) as response:
+                        if response.status_code in {502, 503, 504}:
+                            raise requests.HTTPError(
+                                f"{response.status_code} Server Error from {label}",
+                                response=response,
+                            )
+                        response.raise_for_status()
+
+                        total_bytes = int(response.headers.get("Content-Length") or 0)
+                        downloaded_bytes = 0
+                        last_percent = -1
+
+                        with zip_path.open("wb") as handle:
+                            for chunk in response.iter_content(chunk_size=1024 * 1024):
+                                if not chunk:
+                                    continue
+                                handle.write(chunk)
+                                downloaded_bytes += len(chunk)
+
+                                if total_bytes > 0:
+                                    percent = int(downloaded_bytes * 100 / total_bytes)
+                                    if percent != last_percent:
+                                        last_percent = percent
+                                        self.after(
+                                            0,
+                                            lambda p=percent: self._update_progress_ui(
+                                                "Downloading update...", p
+                                            ),
+                                        )
+
+                    if not zip_path.exists() or zip_path.stat().st_size <= 0:
+                        raise RuntimeError(f"{label} returned an empty update file.")
+                    return True
+
+                except Exception as exc:
+                    errors.append(f"{label} attempt {attempt}: {exc}")
+                    if attempt < 4:
+                        delay = min(8, 2 ** attempt)
+                        self.after(
+                            0,
+                            lambda a=attempt + 1, name=label: self._update_progress_ui(
+                                f"Retrying {name} download (attempt {a}/4)..."
+                            ),
+                        )
+                        time.sleep(delay)
+            return False
+
+        if download_with_requests(direct_url, label="GitHub release"):
+            return
+
+        if api_url and download_with_requests(
+            api_url,
+            extra_headers={"Accept": "application/octet-stream"},
+            label="GitHub asset API",
+        ):
+            return
+
+        if sys.platform.startswith("win"):
+            try:
+                try:
+                    if zip_path.exists():
+                        zip_path.unlink()
+                except OSError:
+                    pass
+
+                self.after(
+                    0,
+                    lambda: self._update_progress_ui(
+                        "GitHub download failed; trying Windows curl..."
+                    ),
+                )
+                subprocess.run(
+                    [
+                        "curl.exe",
+                        "-fL",
+                        "--retry", "5",
+                        "--retry-all-errors",
+                        "--retry-delay", "2",
+                        "--connect-timeout", "20",
+                        "--max-time", "900",
+                        "-A", "BepisDB-Downloader",
+                        "-o", str(zip_path),
+                        direct_url,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                    check=True,
+                )
+                if zip_path.exists() and zip_path.stat().st_size > 0:
+                    return
+                raise RuntimeError("Windows curl returned an empty update file.")
+            except Exception as exc:
+                errors.append(f"Windows curl: {exc}")
+
+        detail = errors[-1] if errors else "Unknown download error."
+        raise RuntimeError(
+            "The update ZIP could not be downloaded after multiple retries and fallbacks.\n\n"
+            f"Last error: {detail}"
+        )
+
     def _begin_self_update(self, latest):
         """Download the release ZIP, launch the helper, then close this EXE."""
         if not getattr(sys, "frozen", False):
@@ -986,35 +1118,7 @@ class BepisApp(ctk.CTk):
                 extract_dir = temp_root / "extracted"
                 extract_dir.mkdir(parents=True, exist_ok=True)
 
-                with requests.get(
-                    download_url,
-                    headers={"User-Agent": "BepisDB-Downloader"},
-                    stream=True,
-                    timeout=(15, 120),
-                    verify=certifi.where(),
-                ) as response:
-                    response.raise_for_status()
-                    total_bytes = int(response.headers.get("Content-Length") or 0)
-                    downloaded_bytes = 0
-                    last_percent = -1
-
-                    with zip_path.open("wb") as handle:
-                        for chunk in response.iter_content(chunk_size=1024 * 1024):
-                            if not chunk:
-                                continue
-                            handle.write(chunk)
-                            downloaded_bytes += len(chunk)
-
-                            if total_bytes > 0:
-                                percent = int(downloaded_bytes * 100 / total_bytes)
-                                if percent != last_percent:
-                                    last_percent = percent
-                                    self.after(
-                                        0,
-                                        lambda p=percent: self._update_progress_ui(
-                                            "Downloading update...", p
-                                        ),
-                                    )
+                self._download_update_asset(asset, zip_path)
 
                 self.after(0, lambda: self._update_progress_ui("Extracting update..."))
                 with zipfile.ZipFile(zip_path, "r") as archive:

@@ -43,7 +43,7 @@ jobs:
             $releaseTag = "${{ github.ref_name }}"
           } elseif ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ inputs.release_tag }}" -ne "") {
             $releaseTag = "${{ inputs.release_tag }}"
-          } elseif ("${{ github.ref_name }}" -eq "main" -and $version -match "-(r\\d+(?:-[A-Za-z0-9._-]+)?)$") {
+          } elseif ("${{ github.ref_name }}" -eq "main" -and $version -match "-(r\d+(?:-[A-Za-z0-9._-]+)?)$") {
             $releaseTag = $Matches[1]
           }
           "version=$version" >> $env:GITHUB_OUTPUT

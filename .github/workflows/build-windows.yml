@@ -107,7 +107,16 @@ jobs:
               "--generate-notes"
             )
 
-            if ($tag -match '^r\d+-.+) {
+            if ($tag -match '^r\d+-.+
+              $releaseArgs += "--prerelease"
+            }
+
+            gh @releaseArgs
+          } else {
+            Write-Host "Release $tag exists. Uploading/replacing $zip."
+            gh release upload "$tag" "$zip" --clobber
+          }
+) {
               $releaseArgs += "--prerelease"
             }
 

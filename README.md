@@ -1,4 +1,4 @@
-# BepisDB Downloader r37-beta
+# BepisDB Downloader
 
 Original project: **BepisDB-downloader by 0AwsD0**  
 https://github.com/0AwsD0/BepisDB-downloader
@@ -100,9 +100,9 @@ Chrome, Edge, or Firefox must already be installed. Firefox is the default.
 - The console/log area supports right-click **Copy** and **Select All**.
 
 
-## r37-beta browserless test
+## r37
 
-This branch is the r37 beta test build for background browser operation and the new pre-scan/status/persistent-settings features. It remains separate from the stable main branch.
+**Current stable release: r37**\n\nr37 adds browserless/headless downloads, true pre-scan with recursive existing-file detection, live download status, User Page content-type filters, an Open Download Folder button, and persistent Windows settings.
 
 - Settings now includes **Browser mode** with `visible` and `headless`.
 - `visible` keeps the current behavior.
@@ -111,7 +111,7 @@ This branch is the r37 beta test build for background browser operation and the 
 - Existing pacing remains unchanged: 3 seconds between downloaded cards and the 5-second batch pause.
 - Test User Page, direct Card/Scene IDs, URL/Search, hidden cards, and Koikatsu Clothing before merging.
 
-### Persistent settings test
+### Persistent settings
 
 - Windows settings are now stored in `%APPDATA%\BepisDB Downloader\config.ini` so they survive deleting or replacing the extracted app folder.
 - On the first run after upgrading, an existing legacy `config.ini` beside the EXE is copied into AppData automatically when no persistent config exists yet.

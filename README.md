@@ -102,14 +102,16 @@ Chrome, Edge, or Firefox must already be installed. Firefox is the default.
 
 ## r37
 
-**Current stable release: r37**\n\nr37 adds browserless/headless downloads, true pre-scan with recursive existing-file detection, live download status, User Page content-type filters, an Open Download Folder button, and persistent Windows settings.
+**Current stable release: r37**
+
+r37 adds browserless/headless downloads, true pre-scan with recursive existing-file detection, live download status, User Page content-type filters, an Open Download Folder button, and persistent Windows settings.
 
 - Settings now includes **Browser mode** with `visible` and `headless`.
 - `visible` keeps the current behavior.
 - `headless` runs Firefox, Chrome, or Edge without showing a browser window.
 - Headless browser sessions are always closed automatically when a download job finishes.
 - Existing pacing remains unchanged: 3 seconds between downloaded cards and the 5-second batch pause.
-- Test User Page, direct Card/Scene IDs, URL/Search, hidden cards, and Koikatsu Clothing before merging.
+- r37 includes the validated User Page, direct Card/Scene IDs, URL/Search, hidden cards, Koikatsu Clothing, and browserless/headless workflows.
 
 ### Persistent settings
 

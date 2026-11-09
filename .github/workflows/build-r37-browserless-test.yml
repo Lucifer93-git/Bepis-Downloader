@@ -1,4 +1,4 @@
-name: Build r37 Browserless Test
+name: Build r37 Beta
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Optional existing release tag to attach the Windows ZIP to (example: r37-beta)'
+        description: 'Release tag to publish the Windows ZIP to (default: r37-beta)'
         required: false
         type: string
 
@@ -65,14 +65,14 @@ jobs:
         run: |
           Compress-Archive -Path dist\BepisDB-Downloader\* -DestinationPath "${{ steps.version.outputs.zip_name }}" -Force
 
-      - name: Upload r37 browserless test artifact
+      - name: Upload r37 beta artifact
         uses: actions/upload-artifact@v4
         with:
-          name: BepisDB-Downloader-r37-Browserless-Test-Windows
+          name: BepisDB-Downloader-r37-Beta-Windows
           path: ${{ steps.version.outputs.zip_name }}
           if-no-files-found: error
 
-      - name: Attach ZIP to GitHub Release
+      - name: Publish ZIP to r37 beta release
         if: steps.version.outputs.release_tag != ''
         shell: pwsh
         env:
@@ -83,8 +83,9 @@ jobs:
 
           gh release view "$tag" | Out-Null
           if ($LASTEXITCODE -ne 0) {
-            Write-Host "Release $tag does not exist yet. Creating it."
+            Write-Host "Release $tag does not exist. Creating a fresh prerelease."
             gh release create "$tag" "$zip" --title "Bepis Downloader $tag" --prerelease --generate-notes
           } else {
+            Write-Host "Release $tag exists. Replacing matching beta asset if present."
             gh release upload "$tag" "$zip" --clobber
           }

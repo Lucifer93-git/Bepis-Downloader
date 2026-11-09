@@ -240,13 +240,15 @@ class BepisApp(ctk.CTk):
             fg_color="transparent",
         ).place(x=0, y=0, relwidth=1, relheight=1)
 
-        # Dark translucent-looking title panel keeps text readable over the art.
+        # Keep the title/logo layout over the banner itself. The custom banner
+        # already includes a dark left-side fade for readability, so a solid
+        # panel here would hide the artwork.
         title_panel = ctk.CTkFrame(
             header,
             width=610,
             height=126,
             corner_radius=0,
-            fg_color="#0a1528",
+            fg_color="transparent",
         )
         title_panel.place(x=0, y=0)
         title_panel.grid_propagate(False)

@@ -315,7 +315,11 @@ def _run_listing(browser, session, data, page_delay, base_url, user_mode=False, 
     )
 
     if not missing_by_page:
-        return
+        return {
+            "page": total_pages,
+            "total_pages": total_pages,
+            "items_total": len(scanned),
+        }
 
     selected_types = set(data.get("selected_types") or ("characters", "clothing", "scenes"))
     for page in range(start_page, total_pages + 1):
@@ -373,6 +377,12 @@ def _run_listing(browser, session, data, page_delay, base_url, user_mode=False, 
             has_more = index < len(rows)-1 or any(p > page for p in missing_by_page)
             session.wait_after_item(has_more, status)
 
+    return {
+        "page": total_pages,
+        "total_pages": total_pages,
+        "items_total": len(scanned),
+    }
+
 
 def run_gui_download(data: dict, destination: Path, progress_callback=None) -> dict:
     """GUI entry point with pre-scan, recursive skips, and progress callbacks."""
@@ -392,6 +402,7 @@ def run_gui_download(data: dict, destination: Path, progress_callback=None) -> d
         print(f"Browser could not be started.\nError: {exc}")
         return {"downloaded":0, "skipped":0, "failed_ids":[]}
 
+    final_progress = {}
     try:
         if data.get("mode") == "ids":
             items = data.get("id_items", [])
@@ -425,14 +436,19 @@ def run_gui_download(data: dict, destination: Path, progress_callback=None) -> d
                 )
                 session.wait_after_item(index < len(missing), status)
 
+            final_progress = {
+                "item": len(items),
+                "total_items": len(items),
+            }
+
         elif data.get("mode") == "user":
-            _run_listing(
+            final_progress = _run_listing(
                 browser, session, data, page_delay, data["url"],
                 user_mode=True, progress_callback=progress_callback,
             )
         else:
             base_url = data.get("url") or core.build_manual_search_url(data["game"], data)
-            _run_listing(
+            final_progress = _run_listing(
                 browser, session, data, page_delay, base_url,
                 user_mode=False, progress_callback=progress_callback,
             )
@@ -451,6 +467,7 @@ def run_gui_download(data: dict, destination: Path, progress_callback=None) -> d
         downloaded=result["downloaded"],
         skipped=result["skipped"],
         failed=len(result["failed_ids"]),
+        **(final_progress or {}),
     )
 
     print("\n" + "-"*40)

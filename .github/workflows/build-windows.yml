@@ -2,7 +2,8 @@ name: Build Windows EXE
 
 on:
   push:
-    branches: [main]
+    branches:
+      - '**'
     tags:
       - 'r*'
   workflow_dispatch:
@@ -14,6 +15,10 @@ on:
 
 permissions:
   contents: write
+
+concurrency:
+  group: windows-build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -41,12 +46,21 @@ jobs:
           $releaseTag = ""
           if ("${{ github.ref_type }}" -eq "tag") {
             $releaseTag = "${{ github.ref_name }}"
-          } elseif ("${{ github.event_name }}" -eq "workflow_dispatch") {
+          } elseif ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ inputs.release_tag }}" -ne "") {
             $releaseTag = "${{ inputs.release_tag }}"
+          } elseif ($version -match "-(r\d+(?:-[A-Za-z0-9._-]+)?)$") {
+            $releaseTag = $Matches[1]
           }
+
+          $refLabel = "${{ github.ref_name }}" -replace '[^A-Za-z0-9._-]', '-'
+          if ([string]::IsNullOrWhiteSpace($refLabel)) {
+            $refLabel = "build"
+          }
+
           "version=$version" >> $env:GITHUB_OUTPUT
           "release_tag=$releaseTag" >> $env:GITHUB_OUTPUT
           "zip_name=BepisDB-Downloader-$version-Windows.zip" >> $env:GITHUB_OUTPUT
+          "artifact_name=BepisDB-Downloader-$refLabel-$version-Windows" >> $env:GITHUB_OUTPUT
 
       - name: Generate branding assets
         run: |
@@ -69,7 +83,7 @@ jobs:
       - name: Upload Windows build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: BepisDB-Downloader-Windows
+          name: ${{ steps.version.outputs.artifact_name }}
           path: ${{ steps.version.outputs.zip_name }}
           if-no-files-found: error
 
@@ -84,8 +98,30 @@ jobs:
 
           gh release view "$tag" | Out-Null
           if ($LASTEXITCODE -ne 0) {
-            Write-Host "Release $tag does not exist yet. Creating it."
-            gh release create "$tag" "$zip" --title "Bepis Downloader $tag" --generate-notes
+            Write-Host "Release $tag does not exist yet. Creating it from commit ${{ github.sha }}."
+
+            $releaseArgs = @(
+              "release", "create", $tag, $zip,
+              "--title", "Bepis Downloader $tag",
+              "--target", "${{ github.sha }}",
+              "--generate-notes"
+            )
+
+            if ($tag -match '^r\d+-.+
+              $releaseArgs += "--prerelease"
+            }
+
+            gh @releaseArgs
           } else {
+            Write-Host "Release $tag exists. Uploading/replacing $zip."
+            gh release upload "$tag" "$zip" --clobber
+          }
+) {
+              $releaseArgs += "--prerelease"
+            }
+
+            gh @releaseArgs
+          } else {
+            Write-Host "Release $tag exists. Uploading/replacing $zip."
             gh release upload "$tag" "$zip" --clobber
           }

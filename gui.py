@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 import queue
 import shutil
@@ -129,6 +130,9 @@ class BepisApp(ctk.CTk):
         self.job_status_label = None
         self.job_progress_label = None
         self.open_folder_button = None
+        self.copy_failed_button = None
+        self.export_failed_button = None
+        self.last_failed_ids = []
 
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(1, weight=1)
@@ -399,7 +403,25 @@ class BepisApp(ctk.CTk):
             state="disabled",
             command=self._open_job_folder,
         )
-        self.open_folder_button.pack(side="right", padx=18, pady=10)
+        self.open_folder_button.pack(side="right", padx=(8,18), pady=10)
+
+        self.export_failed_button = ctk.CTkButton(
+            frame,
+            text="Export Failed",
+            width=120,
+            state="disabled",
+            command=self._export_failed_ids,
+        )
+        self.export_failed_button.pack(side="right", padx=4, pady=10)
+
+        self.copy_failed_button = ctk.CTkButton(
+            frame,
+            text="Copy Failed",
+            width=120,
+            state="disabled",
+            command=self._copy_failed_ids,
+        )
+        self.copy_failed_button.pack(side="right", padx=4, pady=10)
         return frame
 
     def _open_job_folder(self):
@@ -418,6 +440,98 @@ class BepisApp(ctk.CTk):
                 subprocess.Popen(["xdg-open", str(path)])
         except Exception as exc:
             messagebox.showerror("Open folder failed", str(exc))
+
+    def _set_failed_ids(self, failed_ids):
+        self.last_failed_ids = [str(value) for value in (failed_ids or []) if str(value).strip()]
+        state = "normal" if self.last_failed_ids else "disabled"
+        for button in (self.copy_failed_button, self.export_failed_button):
+            try:
+                if button and button.winfo_exists():
+                    button.configure(state=state)
+            except Exception:
+                pass
+
+    def _copy_failed_ids(self):
+        if not self.last_failed_ids:
+            return
+        text = ", ".join(self.last_failed_ids)
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(text)
+            self.update_idletasks()
+            messagebox.showinfo("Failed IDs", f"Copied {len(self.last_failed_ids)} failed ID(s) to the clipboard.")
+        except Exception as exc:
+            messagebox.showerror("Copy failed", str(exc))
+
+    def _export_failed_ids(self):
+        if not self.last_failed_ids:
+            return
+        path = filedialog.asksaveasfilename(
+            title="Export failed IDs",
+            defaultextension=".txt",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
+            initialfile="bepis-failed-ids.txt",
+        )
+        if not path:
+            return
+        try:
+            Path(path).write_text("\n".join(self.last_failed_ids) + "\n", encoding="utf-8")
+            messagebox.showinfo("Failed IDs", f"Exported {len(self.last_failed_ids)} failed ID(s).")
+        except Exception as exc:
+            messagebox.showerror("Export failed", str(exc))
+
+    def _recent_values(self, key):
+        try:
+            raw = load_config().get(key, "[]")
+            values = json.loads(raw)
+            if not isinstance(values, list):
+                return []
+            return [str(value).strip() for value in values if str(value).strip()][:10]
+        except Exception:
+            return []
+
+    def _remember_recent(self, key, value):
+        value = str(value or "").strip()
+        if not value:
+            return
+        values = self._recent_values(key)
+        values = [item for item in values if item.casefold() != value.casefold()]
+        values.insert(0, value)
+        save_config_value(key, json.dumps(values[:10], ensure_ascii=False))
+
+    def _show_finish_notification(self, result):
+        cfg = load_config()
+        if cfg.get("notify_on_complete", "1") != "1" or not sys.platform.startswith("win"):
+            return
+
+        downloaded = int(result.get("downloaded", 0) or 0)
+        skipped = int(result.get("skipped", 0) or 0)
+        failed = len(result.get("failed_ids") or [])
+        body = f"Downloaded: {downloaded}   Skipped: {skipped}   Failed: {failed}"
+
+        # Windows toast without an extra dependency. If Windows blocks the toast
+        # for any reason, fall back to the normal app notification sound.
+        ps = (
+            "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null; "
+            "[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] > $null; "
+            "$xml = New-Object Windows.Data.Xml.Dom.XmlDocument; "
+            "$xml.LoadXml('<toast><visual><binding template=\"ToastGeneric\"><text>BepisDB Downloader</text><text>"
+            + body.replace("&", "and").replace("<", "").replace(">", "")
+            + "</text></binding></visual></toast>'); "
+            "$toast = [Windows.UI.Notifications.ToastNotification]::new($xml); "
+            "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('BepisDB Downloader').Show($toast);"
+        )
+        try:
+            subprocess.Popen(
+                ["powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", ps],
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                close_fds=True,
+            )
+        except Exception:
+            try:
+                self.bell()
+            except Exception:
+                pass
 
     def _set_job_destination(self, destination):
         self.current_job_destination = str(destination) if destination else None
@@ -469,12 +583,14 @@ class BepisApp(ctk.CTk):
                 pass
         self.after(0, apply)
 
-    def _destination_fields(self, parent):
+    def _destination_fields(self, parent, game=None):
         row = ctk.CTkFrame(parent, fg_color="transparent")
         row.pack(fill="x", padx=24, pady=8)
         ctk.CTkLabel(row, text="Save location", text_color=TEXT, width=110, anchor="w").pack(side="left")
         cfg = load_config()
-        default_path = cfg.get("default_save_location", "").strip()
+        game_key = "kk_default_folder" if game == "KK" else "ai_hs2_default_folder" if game == "AI_HS2" else ""
+        game_path = cfg.get(game_key, "").strip() if game_key else ""
+        default_path = game_path or cfg.get("default_save_location", "").strip()
         path = ctk.StringVar(
             value=default_path or str(Path.home()/"Downloads")
         )
@@ -511,7 +627,12 @@ class BepisApp(ctk.CTk):
         row = ctk.CTkFrame(panel, fg_color="transparent")
         row.pack(fill="x", padx=24, pady=(22,8))
         ctk.CTkLabel(row, text="User Page URL", text_color=TEXT, width=110, anchor="w").pack(side="left")
-        ctk.CTkEntry(row, textvariable=url, placeholder_text="https://db.bepis.moe/user/27373").pack(side="left", fill="x", expand=True, padx=8)
+        recent_users = self._recent_values("recent_user_urls")
+        ctk.CTkComboBox(
+            row,
+            variable=url,
+            values=recent_users or [""],
+        ).pack(side="left", fill="x", expand=True, padx=8)
 
         hidden = ctk.BooleanVar(value=False)
         ctk.CTkCheckBox(panel, text="Show hidden cards", variable=hidden).pack(anchor="w", padx=142, pady=8)
@@ -571,7 +692,7 @@ class BepisApp(ctk.CTk):
         ctk.CTkLabel(row, text="IDs", width=110, anchor="w").pack(side="left")
         ctk.CTkEntry(row, textvariable=ids, placeholder_text="1234,1236,1240-1245").pack(side="left", fill="x", expand=True, padx=8)
 
-        base, folder = self._destination_fields(tab)
+        base, folder = self._destination_fields(tab, game)
         ctk.CTkButton(
             tab, text="Start Download", height=44,
             command=lambda: self._start_ids(game,kind,ids.get(),base.get(),folder.get())
@@ -588,12 +709,19 @@ class BepisApp(ctk.CTk):
             row=ctk.CTkFrame(tab,fg_color="transparent")
             row.pack(fill="x",padx=18,pady=5)
             ctk.CTkLabel(row,text=title,width=110,anchor="w").pack(side="left")
-            ctk.CTkEntry(row,textvariable=vars[key]).pack(side="left",fill="x",expand=True,padx=8)
+            if key == "url":
+                ctk.CTkComboBox(
+                    row,
+                    variable=vars[key],
+                    values=self._recent_values("recent_search_urls") or [""],
+                ).pack(side="left",fill="x",expand=True,padx=8)
+            else:
+                ctk.CTkEntry(row,textvariable=vars[key]).pack(side="left",fill="x",expand=True,padx=8)
 
         hidden=ctk.BooleanVar(value=False)
         ctk.CTkCheckBox(tab,text="Show hidden cards",variable=hidden).pack(anchor="w",padx=136,pady=8)
         pages=self._page_fields(tab)
-        base,folder=self._destination_fields(tab)
+        base,folder=self._destination_fields(tab, game)
         ctk.CTkButton(
             tab,text="Start Download",height=44,
             command=lambda:self._start_search(game,vars,hidden.get(),pages.get(),base.get(),folder.get())
@@ -613,6 +741,9 @@ class BepisApp(ctk.CTk):
         delay=ctk.StringVar(value=cfg.get("website_load_interval","5"))
         close=ctk.BooleanVar(value=cfg.get("close_browser_after_download","0")=="1")
         browser_mode=ctk.StringVar(value=cfg.get("browser_mode","visible"))
+        notify=ctk.BooleanVar(value=cfg.get("notify_on_complete","1")=="1")
+        kk_default=ctk.StringVar(value=cfg.get("kk_default_folder",""))
+        ai_default=ctk.StringVar(value=cfg.get("ai_hs2_default_folder",""))
 
         row=ctk.CTkFrame(panel,fg_color="transparent")
         row.pack(fill="x",padx=24,pady=12)
@@ -651,12 +782,29 @@ class BepisApp(ctk.CTk):
             command=lambda:self._browse(default_save),
         ).pack(side="left")
 
-        ctk.CTkCheckBox(panel,text="Close browser after download",variable=close).pack(anchor="w",padx=184,pady=10)
+        for label, variable in (
+            ("Koikatsu default folder", kk_default),
+            ("AI / HS2 default folder", ai_default),
+        ):
+            row=ctk.CTkFrame(panel,fg_color="transparent")
+            row.pack(fill="x",padx=24,pady=12)
+            ctk.CTkLabel(row,text=label,width=160,anchor="w").pack(side="left")
+            ctk.CTkEntry(row,textvariable=variable).pack(side="left",fill="x",expand=True,padx=(0,8))
+            ctk.CTkButton(
+                row,
+                text="Browse",
+                width=90,
+                command=lambda v=variable:self._browse(v),
+            ).pack(side="left")
+
+        ctk.CTkCheckBox(panel,text="Windows notification when download finishes",variable=notify).pack(anchor="w",padx=184,pady=(8,4))
+        ctk.CTkCheckBox(panel,text="Close browser after download",variable=close).pack(anchor="w",padx=184,pady=4)
         ctk.CTkButton(
             panel,
             text="Save Settings",
             command=lambda:self._save_settings(
-                browser.get(),delay.get(),close.get(),default_save.get(),browser_mode.get()
+                browser.get(),delay.get(),close.get(),default_save.get(),browser_mode.get(),
+                notify.get(),kk_default.get(),ai_default.get()
             ),
         ).pack(anchor="w",padx=184,pady=(10,20))
 
@@ -707,6 +855,7 @@ class BepisApp(ctk.CTk):
             start,end=self._parse_pages(pages)
         except ValueError as exc:
             return messagebox.showerror("Invalid pages",str(exc))
+        self._remember_recent("recent_user_urls", norm)
         self._run_async({
             "mode":"user",
             "url":norm,
@@ -743,6 +892,7 @@ class BepisApp(ctk.CTk):
             if not ok:
                 return messagebox.showerror("Invalid URL",msg)
             url=norm
+            self._remember_recent("recent_search_urls", norm)
 
         try:
             gender=normalize_gender(vars["gender"].get().strip())
@@ -771,6 +921,7 @@ class BepisApp(ctk.CTk):
         if self.worker and self.worker.is_alive():
             return messagebox.showinfo("Download running","A download is already running.")
 
+        self._set_failed_ids([])
         self.status.configure(text="● Working...",text_color="#ffd27a")
         try:
             if self.job_status_label and self.job_status_label.winfo_exists():
@@ -793,8 +944,11 @@ class BepisApp(ctk.CTk):
                     print("\nFinished.")
                     print(f"Downloaded: {result.get('downloaded',0)}")
                     print(f"Skipped existing: {result.get('skipped',0)}")
-                    if result.get('failed_ids'):
-                        print("Failed: "+", ".join(result['failed_ids']))
+                    failed_ids = result.get('failed_ids') or []
+                    self.after(0, lambda ids=list(failed_ids): self._set_failed_ids(ids))
+                    self.after(0, lambda r=dict(result): self._show_finish_notification(r))
+                    if failed_ids:
+                        print("Failed: "+", ".join(failed_ids))
             except Exception as exc:
                 self.log_queue.put(f"\nError: {exc}\n")
                 self._job_progress({"phase":"complete","downloaded":0,"skipped":0,"failed":1})
@@ -815,7 +969,10 @@ class BepisApp(ctk.CTk):
             pass
         self.after(80,self._drain_log)
 
-    def _save_settings(self,browser,delay,close,default_save="",browser_mode="visible"):
+    def _save_settings(
+        self,browser,delay,close,default_save="",browser_mode="visible",
+        notify=True,kk_default="",ai_default=""
+    ):
         try:
             value=int(delay)
             if value<5:
@@ -827,6 +984,9 @@ class BepisApp(ctk.CTk):
         save_config_value("website_load_interval",str(value))
         save_config_value("close_browser_after_download","1" if close else "0")
         save_config_value("default_save_location",default_save.strip())
+        save_config_value("notify_on_complete","1" if notify else "0")
+        save_config_value("kk_default_folder",kk_default.strip())
+        save_config_value("ai_hs2_default_folder",ai_default.strip())
         browser_mode = "headless" if str(browser_mode).strip().casefold() == "headless" else "visible"
         save_config_value("browser_mode",browser_mode)
         mode_label = "Headless" if browser_mode == "headless" else "Visible"

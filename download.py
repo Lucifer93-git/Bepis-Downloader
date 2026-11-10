@@ -40,7 +40,7 @@ except ImportError:
     By = WebDriverWait = None
 
 
-APP_VERSION = "2026.11.09-r37"
+APP_VERSION = "2026.11.10-r38-alpha"
 PROJECT_DIR = Path(__file__).resolve().parent
 LEGACY_CONFIG_PATH = (
     Path(sys.executable).resolve().parent / "config.ini"
@@ -76,6 +76,11 @@ DEFAULT_CONFIG = {
     "close_browser_after_download": "0",
     "default_save_location": "",
     "browser_mode": "visible",
+    "notify_on_complete": "1",
+    "kk_default_folder": "",
+    "ai_hs2_default_folder": "",
+    "recent_search_urls": "[]",
+    "recent_user_urls": "[]",
 }
 
 CARD_DELAY_SECONDS = 3

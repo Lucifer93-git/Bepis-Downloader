@@ -33,7 +33,8 @@ from download import (
 from gui_backend import APP_VERSION, prepare_destination, run_gui_download
 
 REPO_URL = "https://github.com/Lucifer93-git/Bepis-Downloader"
-REMOTE_VERSION = "https://raw.githubusercontent.com/Lucifer93-git/Bepis-Downloader/main/version.txt"
+UPDATE_BRANCH = "r38-qol-alpha"
+REMOTE_VERSION = f"https://raw.githubusercontent.com/Lucifer93-git/Bepis-Downloader/{UPDATE_BRANCH}/version.txt"
 RELEASE_API = "https://api.github.com/repos/Lucifer93-git/Bepis-Downloader/releases/tags/{tag}"
 
 ctk.set_appearance_mode("dark")
@@ -1033,14 +1034,12 @@ class BepisApp(ctk.CTk):
         raise RuntimeError(str(primary_error) if primary_error else "Update check failed.")
 
     def _release_tag_for_version(self, version):
-        """Convert 2026.10.26-r34 to the GitHub release tag r34."""
+        """Convert app versions to release tags, including prereleases."""
         value = str(version or "").strip()
-        if "-" not in value:
-            raise ValueError(f"Invalid version: {value}")
-        tag = value.rsplit("-", 1)[-1].strip()
-        if not tag.lower().startswith("r"):
+        match = re.search(r"-(r\d+(?:-[A-Za-z0-9._-]+)?)$", value, re.IGNORECASE)
+        if not match:
             raise ValueError(f"Invalid release tag in version: {value}")
-        return tag
+        return match.group(1)
 
     def _release_info(self, version):
         """Return the matching GitHub release and its Windows ZIP asset."""

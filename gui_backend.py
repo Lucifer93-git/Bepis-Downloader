@@ -311,6 +311,7 @@ def _run_listing(browser, session, data, page_delay, base_url, user_mode=False, 
         total_pages=total_pages,
         downloaded=session.downloaded,
         skipped=session.skipped,
+        processed=session.processed,
         items_total=len(scanned),
     )
 
@@ -332,6 +333,7 @@ def _run_listing(browser, session, data, page_delay, base_url, user_mode=False, 
                 total_pages=total_pages,
                 downloaded=session.downloaded,
                 skipped=session.skipped,
+                processed=session.processed,
                 items_total=len(scanned),
             )
             continue
@@ -372,6 +374,7 @@ def _run_listing(browser, session, data, page_delay, base_url, user_mode=False, 
                 total_pages=total_pages,
                 downloaded=session.downloaded,
                 skipped=session.skipped,
+                processed=session.processed,
                 items_total=len(scanned),
             )
             has_more = index < len(rows)-1 or any(p > page for p in missing_by_page)
@@ -423,6 +426,7 @@ def run_gui_download(data: dict, destination: Path, progress_callback=None) -> d
                 total_items=len(items),
                 downloaded=0,
                 skipped=session.skipped,
+                processed=session.processed,
             )
             for index, item in enumerate(missing, 1):
                 status = session.process_direct_id(browser, item, page_delay)
@@ -433,6 +437,7 @@ def run_gui_download(data: dict, destination: Path, progress_callback=None) -> d
                     total_items=len(items),
                     downloaded=session.downloaded,
                     skipped=session.skipped,
+                    processed=session.processed,
                 )
                 session.wait_after_item(index < len(missing), status)
 
@@ -467,6 +472,7 @@ def run_gui_download(data: dict, destination: Path, progress_callback=None) -> d
         downloaded=result["downloaded"],
         skipped=result["skipped"],
         failed=len(result["failed_ids"]),
+        processed=session.processed,
         **(final_progress or {}),
     )
 

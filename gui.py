@@ -156,7 +156,19 @@ class BepisApp(ctk.CTk):
         if not (is_text or is_entry):
             return
 
-        menu = Menu(self, tearoff=0)
+        menu = Menu(
+            self,
+            tearoff=0,
+            background="#101b2e",
+            foreground="#e9f0ff",
+            activebackground="#2f8cff",
+            activeforeground="#ffffff",
+            disabledforeground="#71809b",
+            selectcolor="#2f8cff",
+            borderwidth=1,
+            relief="flat",
+            font=("Segoe UI", 10),
+        )
 
         # The log console should stay copy-oriented; editable fields get the
         # normal Cut/Copy/Paste actions.

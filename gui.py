@@ -238,28 +238,17 @@ class BepisApp(ctk.CTk):
             dark_image=banner,
             size=(1380, 126),
         )
-        ctk.CTkLabel(
+        banner_label = ctk.CTkLabel(
             header,
             text="",
             image=self.header_banner_image,
             fg_color="transparent",
-        ).place(x=0, y=0, relwidth=1, relheight=1)
-
-        # Keep the title/logo layout over the banner itself. The custom banner
-        # already includes a dark left-side fade for readability, so a solid
-        # panel here would hide the artwork.
-        title_panel = ctk.CTkFrame(
-            header,
-            width=610,
-            height=126,
-            corner_radius=0,
-            fg_color="transparent",
         )
-        title_panel.place(x=0, y=0)
-        title_panel.grid_propagate(False)
-        title_panel.grid_columnconfigure(1, weight=1)
+        banner_label.place(x=0, y=0, relwidth=1, relheight=1)
 
-        # BepisDB face/logo at the left, matching the Windows app icon.
+        # Overlay branding directly on the banner widget. Parenting these labels
+        # to the banner avoids CustomTkinter's transparent-frame behavior, which
+        # previously painted a solid navy block over the left side of the art.
         try:
             logo = Image.open(_asset_path("assets/app-icon.png"))
             self.header_logo_image = ctk.CTkImage(
@@ -268,33 +257,38 @@ class BepisApp(ctk.CTk):
                 size=(64, 64),
             )
             ctk.CTkLabel(
-                title_panel,
+                banner_label,
                 text="",
                 image=self.header_logo_image,
                 fg_color="transparent",
-            ).grid(row=0, column=0, rowspan=2, padx=(28, 18), pady=22)
+            ).place(x=28, y=31)
         except Exception:
             self.header_logo_image = None
             ctk.CTkLabel(
-                title_panel,
+                banner_label,
                 text="B",
                 font=ctk.CTkFont(size=34, weight="bold"),
                 text_color="#d8875d",
-            ).grid(row=0, column=0, rowspan=2, padx=(34, 18), pady=22)
+                fg_color="transparent",
+            ).place(x=34, y=38)
 
         ctk.CTkLabel(
-            title_panel,
+            banner_label,
             text="BepisDB Downloader",
             font=ctk.CTkFont(size=35, weight="bold"),
             text_color=TEXT,
-        ).grid(row=0, column=1, sticky="sw", pady=(24, 0))
+            fg_color="transparent",
+            anchor="w",
+        ).place(x=110, y=24)
 
         ctk.CTkLabel(
-            title_panel,
+            banner_label,
             text=f"{APP_VERSION}   •   Updated by LuC!f3r",
             font=ctk.CTkFont(size=16),
             text_color="#9db8ff",
-        ).grid(row=1, column=1, sticky="nw", pady=(2, 20))
+            fg_color="transparent",
+            anchor="w",
+        ).place(x=110, y=78)
 
     def _build_sidebar(self):
         self.sidebar = ctk.CTkFrame(self, width=235, corner_radius=0, fg_color="#0b1423")

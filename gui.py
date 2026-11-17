@@ -134,6 +134,12 @@ class BepisApp(ctk.CTk):
         self.copy_failed_button = None
         self.export_failed_button = None
         self.last_failed_ids = []
+        self.job_progress_bar = None
+        self.job_percent_label = None
+        self.console_frame = None
+        self.console_body = None
+        self.details_button = None
+        self.details_visible = False
 
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(1, weight=1)
@@ -375,60 +381,153 @@ class BepisApp(ctk.CTk):
         self._make_console(wrap)
 
     def _make_console(self, parent):
-        frame = ctk.CTkFrame(parent, fg_color=PANEL2, border_width=1, border_color=BORDER, corner_radius=12)
-        frame.pack(fill="both", expand=True, padx=34, pady=(18, 28))
-        self.console = ctk.CTkTextbox(frame, fg_color="#07101d", text_color="#d7e5ff", font=("Consolas", 13), wrap="word")
-        self.console.pack(fill="both", expand=True, padx=12, pady=12)
-        self.console.insert("end", f"BepisDB Downloader {APP_VERSION}\nOriginal project by 0AwsD0 | Updated by LuC!f3r\nReady.\n")
+        frame = ctk.CTkFrame(
+            parent, fg_color=PANEL2, border_width=1,
+            border_color=BORDER, corner_radius=12,
+        )
+        frame.pack(fill="x", padx=34, pady=(12, 28))
+        self.console_frame = frame
+        self.details_visible = False
+
+        header = ctk.CTkFrame(frame, fg_color="transparent")
+        header.pack(fill="x", padx=12, pady=10)
+
+        self.details_button = ctk.CTkButton(
+            header,
+            text="Show Details",
+            width=130,
+            fg_color="#1b2a42",
+            hover_color="#263a5b",
+            command=self._toggle_details,
+        )
+        self.details_button.pack(side="left")
+
+        ctk.CTkLabel(
+            header,
+            text="Raw downloader output",
+            text_color=MUTED,
+            font=ctk.CTkFont(size=13),
+        ).pack(side="left", padx=12)
+
+        self.console_body = ctk.CTkFrame(frame, fg_color="transparent")
+        self.console = ctk.CTkTextbox(
+            self.console_body,
+            height=220,
+            fg_color="#07101d",
+            text_color="#d7e5ff",
+            font=("Consolas", 13),
+            wrap="word",
+        )
+        self.console.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+        self.console.insert(
+            "end",
+            f"BepisDB Downloader {APP_VERSION}\n"
+            "Original project by 0AwsD0 | Updated by LuC!f3r\n"
+            "Ready.\n",
+        )
         return frame
 
+    def _toggle_details(self):
+        try:
+            if not self.console_body or not self.console_body.winfo_exists():
+                return
+            self.details_visible = not self.details_visible
+            if self.details_visible:
+                self.console_body.pack(fill="both", expand=True)
+                if self.details_button and self.details_button.winfo_exists():
+                    self.details_button.configure(text="Hide Details")
+            else:
+                self.console_body.pack_forget()
+                if self.details_button and self.details_button.winfo_exists():
+                    self.details_button.configure(text="Show Details")
+        except Exception:
+            pass
+
+    def _clear_console_for_new_job(self):
+        try:
+            if hasattr(self, "console") and self.console.winfo_exists():
+                self.console.delete("1.0", "end")
+                self.console.insert(
+                    "end",
+                    f"BepisDB Downloader {APP_VERSION}\n"
+                    "Original project by 0AwsD0 | Updated by LuC!f3r\n"
+                    "Starting new download...\n\n",
+                )
+        except Exception:
+            pass
+
     def _make_job_status(self, parent):
-        """Reusable download status strip; later this can move into the queue page."""
+        """Reusable download status strip with percentage progress."""
         frame = ctk.CTkFrame(
             parent, fg_color=PANEL, border_width=1, border_color=BLUE, corner_radius=12
         )
         frame.pack(fill="x", padx=34, pady=(14, 0))
 
+        top = ctk.CTkFrame(frame, fg_color="transparent")
+        top.pack(fill="x")
+
         self.job_status_label = ctk.CTkLabel(
-            frame, text="● Ready", text_color="#86e6b5",
+            top, text="● Ready", text_color="#86e6b5",
             font=ctk.CTkFont(size=15, weight="bold"),
         )
-        self.job_status_label.pack(side="left", padx=(22, 30), pady=14)
+        self.job_status_label.pack(side="left", padx=(22, 18), pady=(12, 8))
 
         self.job_progress_label = ctk.CTkLabel(
-            frame,
+            top,
             text="Page: 0 / ?     Downloaded: 0     Skipped: 0",
             text_color=TEXT,
             font=ctk.CTkFont(size=15, weight="bold"),
         )
-        self.job_progress_label.pack(side="left", padx=16, pady=14)
+        self.job_progress_label.pack(side="left", padx=12, pady=(12, 8))
 
         self.open_folder_button = ctk.CTkButton(
-            frame,
+            top,
             text="Open Download Folder",
             width=180,
             state="disabled",
             command=self._open_job_folder,
         )
-        self.open_folder_button.pack(side="right", padx=(8,18), pady=10)
+        self.open_folder_button.pack(side="right", padx=(8,18), pady=(10, 6))
 
         self.export_failed_button = ctk.CTkButton(
-            frame,
+            top,
             text="Export Failed IDs",
-            width=120,
+            width=135,
             state="disabled",
             command=self._export_failed_ids,
         )
-        self.export_failed_button.pack(side="right", padx=4, pady=10)
+        self.export_failed_button.pack(side="right", padx=4, pady=(10, 6))
 
         self.copy_failed_button = ctk.CTkButton(
-            frame,
+            top,
             text="Copy Failed IDs",
-            width=120,
+            width=135,
             state="disabled",
             command=self._copy_failed_ids,
         )
-        self.copy_failed_button.pack(side="right", padx=4, pady=10)
+        self.copy_failed_button.pack(side="right", padx=4, pady=(10, 6))
+
+        progress_row = ctk.CTkFrame(frame, fg_color="transparent")
+        progress_row.pack(fill="x", padx=22, pady=(0, 12))
+
+        self.job_progress_bar = ctk.CTkProgressBar(
+            progress_row,
+            height=12,
+            corner_radius=6,
+            progress_color=BLUE,
+        )
+        self.job_progress_bar.pack(side="left", fill="x", expand=True, padx=(0, 12))
+        self.job_progress_bar.set(0)
+
+        self.job_percent_label = ctk.CTkLabel(
+            progress_row,
+            text="0%",
+            width=48,
+            text_color="#8fb6ff",
+            font=ctk.CTkFont(size=14, weight="bold"),
+        )
+        self.job_percent_label.pack(side="right")
+
         return frame
 
     def _open_job_folder(self):
@@ -556,20 +655,46 @@ class BepisApp(ctk.CTk):
             try:
                 if not self.job_progress_label or not self.job_progress_label.winfo_exists():
                     return
+
                 phase = state.get("phase", "downloading")
                 downloaded = int(state.get("downloaded", 0) or 0)
                 skipped = int(state.get("skipped", 0) or 0)
+                processed = int(state.get("processed", downloaded + skipped) or 0)
 
+                total_for_percent = 0
                 if "total_items" in state:
-                    current = int(state.get("item", 0) or 0)
+                    current = int(state.get("item", processed) or 0)
                     total = int(state.get("total_items", 0) or 0)
-                    progress = f"Items: {current} / {total}     Downloaded: {downloaded}     Skipped: {skipped}"
+                    total_for_percent = total
+                    processed = max(processed, current)
+                    progress = (
+                        f"Items: {current} / {total}     "
+                        f"Downloaded: {downloaded}     Skipped: {skipped}"
+                    )
                 else:
                     page = int(state.get("page", 0) or 0)
                     total_pages = state.get("total_pages", "?")
-                    progress = f"Page: {page} / {total_pages}     Downloaded: {downloaded}     Skipped: {skipped}"
+                    items_total = int(state.get("items_total", 0) or 0)
+                    total_for_percent = items_total
+                    progress = (
+                        f"Page: {page} / {total_pages}     "
+                        f"Downloaded: {downloaded}     Skipped: {skipped}"
+                    )
+
+                if phase == "complete":
+                    percent = 100
+                elif total_for_percent > 0:
+                    percent = max(0, min(100, round((processed / total_for_percent) * 100)))
+                else:
+                    percent = 0
 
                 self.job_progress_label.configure(text=progress)
+
+                if self.job_progress_bar and self.job_progress_bar.winfo_exists():
+                    self.job_progress_bar.set(percent / 100)
+                if self.job_percent_label and self.job_percent_label.winfo_exists():
+                    self.job_percent_label.configure(text=f"{percent}%")
+
                 if self.job_status_label and self.job_status_label.winfo_exists():
                     labels = {
                         "scanning": ("● Scanning...", "#ffd27a"),
@@ -584,10 +709,12 @@ class BepisApp(ctk.CTk):
                     failed = int(state.get("failed", 0) or 0)
                     if failed:
                         self.job_status_label.configure(
-                            text=f"● Complete with {failed} failed", text_color="#ffb36b"
+                            text=f"● Complete with {failed} failed",
+                            text_color="#ffb36b",
                         )
             except Exception:
                 pass
+
         self.after(0, apply)
 
     def _destination_fields(self, parent, game=None):
@@ -929,6 +1056,7 @@ class BepisApp(ctk.CTk):
             return messagebox.showinfo("Download running","A download is already running.")
 
         self._set_failed_ids([])
+        self._clear_console_for_new_job()
         self.status.configure(text="● Working...",text_color="#ffd27a")
         try:
             if self.job_status_label and self.job_status_label.winfo_exists():
@@ -938,6 +1066,10 @@ class BepisApp(ctk.CTk):
                     self.job_progress_label.configure(text="Items: 0 / ?     Downloaded: 0     Skipped: 0")
                 else:
                     self.job_progress_label.configure(text="Page: 0 / ?     Downloaded: 0     Skipped: 0")
+            if self.job_progress_bar and self.job_progress_bar.winfo_exists():
+                self.job_progress_bar.set(0)
+            if self.job_percent_label and self.job_percent_label.winfo_exists():
+                self.job_percent_label.configure(text="0%")
         except Exception:
             pass
 

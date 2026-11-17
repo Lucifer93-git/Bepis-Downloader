@@ -9,7 +9,7 @@ from pathlib import Path
 
 import download as core
 
-APP_VERSION = "2026.11.10-r38-alpha"
+APP_VERSION = "2026.11.17-r38-beta"
 
 # User settings are stored persistently by download.py (AppData on Windows).
 

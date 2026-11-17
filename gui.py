@@ -402,7 +402,7 @@ class BepisApp(ctk.CTk):
 
         self.export_failed_button = ctk.CTkButton(
             frame,
-            text="Export Failed",
+            text="Export Failed IDs",
             width=120,
             state="disabled",
             command=self._export_failed_ids,
@@ -411,7 +411,7 @@ class BepisApp(ctk.CTk):
 
         self.copy_failed_button = ctk.CTkButton(
             frame,
-            text="Copy Failed",
+            text="Copy Failed IDs",
             width=120,
             state="disabled",
             command=self._copy_failed_ids,

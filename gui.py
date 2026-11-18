@@ -33,7 +33,7 @@ from download import (
 from gui_backend import APP_VERSION, prepare_destination, run_gui_download
 
 REPO_URL = "https://github.com/Lucifer93-git/Bepis-Downloader"
-UPDATE_BRANCH = "r38-qol-beta"
+UPDATE_BRANCH = "r38-qol-gamma"
 REMOTE_VERSION = f"https://raw.githubusercontent.com/Lucifer93-git/Bepis-Downloader/{UPDATE_BRANCH}/version.txt"
 RELEASE_API = "https://api.github.com/repos/Lucifer93-git/Bepis-Downloader/releases/tags/{tag}"
 

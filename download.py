@@ -40,7 +40,7 @@ except ImportError:
     By = WebDriverWait = None
 
 
-APP_VERSION = "2026.11.17-r38-beta"
+APP_VERSION = "2026.11.18-r38-gamma"
 PROJECT_DIR = Path(__file__).resolve().parent
 LEGACY_CONFIG_PATH = (
     Path(sys.executable).resolve().parent / "config.ini"
